@@ -189,15 +189,16 @@
   padding: 5px 10px;
 }
 .usage-row {
-  display: grid;
-  grid-template-columns: 26px 38px 1fr;
+  display: flex;
   align-items: baseline;
-  gap: 0 4px;
+  gap: 4px;
   font-feature-settings: "tnum";
 }
 .usage-label {
   color: #888;
   font-size: 10px;
+  width: 26px;
+  flex-shrink: 0;
 }
 .usage-pct {
   font-weight: 600;
@@ -205,6 +206,8 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: pre;
+  width: 38px;
+  flex-shrink: 0;
 }
 .usage-pct.warn { color: #d68a1f; }
 .usage-pct.danger { color: #d34141; }
@@ -213,7 +216,10 @@
   color: #999;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  padding-left: 2px;
+  padding-left: 4px;
+  margin-left: auto;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 /* Cache bubble stats row (hits / misses / combo) */
@@ -274,21 +280,26 @@
    건드리지 않아 idle bob/sway/action 애니메이션과 충돌하지 않음.
    selector specificity를 [data-state] 기본 모션보다 높여 우선시킴. */
 .character[data-flash="hit"][data-state] {
-  animation: hit-glow-pulse 0.9s ease-out !important;
+  animation: hit-glow-pulse 2.2s ease-out !important;
 }
 @keyframes hit-glow-pulse {
   0% {
     filter: drop-shadow(0 0 0 rgba(255, 220, 90, 0))
             drop-shadow(0 0 0 rgba(255, 200, 50, 0));
   }
-  20% {
-    filter: drop-shadow(0 0 14px rgba(255, 230, 110, 1))
-            drop-shadow(0 0 26px rgba(255, 200, 60, 0.95))
-            drop-shadow(0 0 42px rgba(255, 180, 30, 0.75));
+  10% {
+    filter: drop-shadow(0 0 18px rgba(255, 235, 130, 1))
+            drop-shadow(0 0 32px rgba(255, 210, 70, 1))
+            drop-shadow(0 0 50px rgba(255, 190, 40, 0.9));
+  }
+  60% {
+    filter: drop-shadow(0 0 14px rgba(255, 225, 100, 0.95))
+            drop-shadow(0 0 26px rgba(255, 200, 60, 0.7))
+            drop-shadow(0 0 40px rgba(255, 180, 30, 0.5));
   }
   100% {
-    filter: drop-shadow(0 0 8px rgba(255, 220, 90, 0.6))
-            drop-shadow(0 0 18px rgba(255, 200, 50, 0.35));
+    filter: drop-shadow(0 0 0 rgba(255, 220, 90, 0))
+            drop-shadow(0 0 0 rgba(255, 200, 50, 0));
   }
 }
 .character[data-flash="miss"] {

@@ -596,7 +596,7 @@ function Pet({
     if (lastReq && lastReq !== seenLastReq && snap.last_cache_hit !== null) {
       const trigger: "hit" | "miss" = snap.last_cache_hit ? "hit" : "miss";
       setFlash(trigger);
-      const dur = trigger === "miss" ? 4000 : 1200;
+      const dur = trigger === "miss" ? 4000 : 2500;
       const t = setTimeout(() => setFlash(null), dur);
       setSeenLastReq(lastReq);
       return () => clearTimeout(t);
