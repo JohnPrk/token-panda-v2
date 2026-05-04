@@ -2,7 +2,7 @@
 
 > 데스크톱 한구석에서 너의 Claude 토큰 잔량을 지켜봐주는 작은 판다.
 
-[![Download .dmg](https://img.shields.io/badge/Download-.dmg%20v1.0.17-6b4cff?style=for-the-badge&logo=apple)](https://github.com/JohnPrk/token-panda/releases/latest/download/token-panda_1.0.17_aarch64.dmg)
+[![Download .dmg](https://img.shields.io/badge/Download-.dmg%20v1.17.0-6b4cff?style=for-the-badge&logo=apple)](https://github.com/JohnPrk/token-panda/releases/latest/download/token-panda_1.17.0_aarch64.dmg)
 [![macOS only](https://img.shields.io/badge/platform-macOS%2011%2B-lightgrey?style=for-the-badge&logo=apple)](#한계)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](#라이선스)
 
@@ -107,7 +107,7 @@ npm run tauri:build
 
 | 위치 | 보이는 것 | 조작 |
 | --- | --- | --- |
-| 메뉴바 | 잔량 % + 대나무 아이콘 (100~75%: 4줄기 / 74~50%: 3줄기 / 49~25%: 2줄기 / 24~0%: 1줄기) | 클릭으로 메뉴 열기 |
+| 메뉴바 | 잔량 % + 대나무 아이콘 (75% 이상: 4줄기 / 50~75%: 3줄기 / 25~50%: 2줄기 / 25% 미만: 1줄기) | 클릭으로 메뉴 열기 |
 | 메뉴바 메뉴 | 버전 표시, `펫 보이기/숨기기`, `지금 새로고침`, `설정...`, `종료` | 펫을 일시적으로 숨기거나 쿠키 갱신 시 |
 | 펫 창 | 5h / 주간 잔량 % + 캐시 타이머 + 캐릭터 모션 | 클릭 앤 드래그로 위치 이동, 우클릭으로 즉시 새로고침 |
 
