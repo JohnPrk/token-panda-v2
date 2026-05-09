@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ApiConfig, PlanConfig, UsageSnapshot } from "./types";
+import type { Account, AccountsConfig, PlanConfig, UsageSnapshot } from "./types";
 import { PLAN_PRESETS } from "./types";
 import {
-  loadApiConfig,
+  cryptoRandomId,
+  loadAccountsConfig,
   loadPlanConfig,
-  saveApiConfig,
+  saveAccountsConfig,
   savePlanConfig,
 } from "./store";
 import { ACCESSORIES, DEFAULT_SKIN_ID, SKINS, findSkin, type ActionName } from "./skins";
@@ -101,6 +102,43 @@ const REMAINING_THRESHOLDS: Array<[number, string]> = [
 ];
 
 type View = "loading" | "pet";
+
+// 계정 묶음(특히 활성 계정) 변경을 한 트랜잭션으로 처리하는 헬퍼.
+// 호출처: 트레이 메뉴, 설정 창의 계정 카드 클릭/추가/삭제.
+// 1) AccountsConfig 저장
+// 2) 활성 계정의 자격증명/skin을 Rust로 푸시
+// 3) PlanConfig.skin을 활성 계정의 skinId로 동기화 (Pet 컴포넌트가 여기서 그림)
+// 4) 트레이 메뉴 라벨/체크 표시 리빌드
+// 5) 즉시 새 자격증명으로 polling 한 번 (refresh_usage)
+// 6) `config-changed` emit → 메인 펫 윈도우가 새 plan 다시 읽음
+async function switchActiveAccount(next: AccountsConfig): Promise<void> {
+  await saveAccountsConfig(next);
+  const active = next.accounts.find((a) => a.id === next.activeAccountId);
+  if (active) {
+    const plan = await loadPlanConfig();
+    if (!plan || plan.skin !== active.skinId) {
+      const synced: PlanConfig = plan
+        ? { ...plan, skin: active.skinId }
+        : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
+      await savePlanConfig(synced);
+    }
+    await invoke("set_api_config", {
+      orgId: active.orgId,
+      cookie: active.cookie,
+    }).catch(() => {});
+    await invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
+    await invoke("refresh_usage").catch(() => {});
+  } else {
+    await invoke("set_api_config", { orgId: null, cookie: null }).catch(
+      () => {},
+    );
+  }
+  await invoke("update_tray_accounts", {
+    accounts: next.accounts.map((a) => ({ id: a.id, label: a.label })),
+    activeId: next.activeAccountId,
+  }).catch(() => {});
+  await emit("config-changed");
+}
 
 // Three windows share this bundle: the pinned pet panel ("main"), the
 // settings popup ("settings"), and the first-run onboarding popup
@@ -229,32 +267,62 @@ function PetApp() {
   const [config, setConfig] = useState<PlanConfig | null>(null);
 
   useEffect(() => {
-    Promise.all([loadPlanConfig(), loadApiConfig()]).then(([cfg, api]) => {
-      if (api) {
-        invoke("set_api_config", { orgId: api.orgId, cookie: api.cookie }).catch(
-          () => {},
+    Promise.all([loadPlanConfig(), loadAccountsConfig()]).then(
+      async ([planCfg, accCfg]) => {
+        const active = accCfg.accounts.find(
+          (a) => a.id === accCfg.activeAccountId,
         );
-      }
-      if (cfg) {
-        setConfig(cfg);
-        setView("pet");
-      } else {
-        // First launch — silently save a default plan so the rest of
-        // the pet logic has something to render against, then pop the
-        // standalone onboarding window. The character picker and API
-        // form live there, so the pet stops needing a plan modal.
-        const defaultCfg: PlanConfig = {
+
+        // 활성 계정이 있으면 그 자격증명을 Rust로 푸시 + skin/트레이 메뉴 동기화.
+        // 활성 캐릭터는 PlanConfig.skin과 항상 같아야 한다 (Pet 컴포넌트가
+        // config.skin을 그린다). 첫 부팅이거나 계정이 비었으면 기본 plan만
+        // 저장하고 온보딩 창을 띄운다.
+        if (active) {
+          invoke("set_api_config", {
+            orgId: active.orgId,
+            cookie: active.cookie,
+          }).catch(() => {});
+          invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
+          invoke("update_tray_accounts", {
+            accounts: accCfg.accounts.map((a) => ({
+              id: a.id,
+              label: a.label,
+            })),
+            activeId: active.id,
+          }).catch(() => {});
+
+          const synced: PlanConfig = planCfg
+            ? { ...planCfg, skin: active.skinId }
+            : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
+          if (!planCfg || planCfg.skin !== active.skinId) {
+            await savePlanConfig(synced);
+          }
+          setConfig(synced);
+          setView("pet");
+          return;
+        }
+
+        // 계정이 비어 있는 첫 실행 (또는 전부 삭제된 상태). 펫은 기본 판다로
+        // 일단 띄우고, 온보딩에서 첫 계정을 만들도록 유도.
+        const defaultCfg: PlanConfig = planCfg ?? {
           plan: "max5x",
           limits: PLAN_PRESETS.max5x,
           skin: DEFAULT_SKIN_ID,
         };
-        savePlanConfig(defaultCfg).then(() => {
-          setConfig(defaultCfg);
-          setView("pet");
+        if (!planCfg) {
+          await savePlanConfig(defaultCfg);
+        }
+        // 메뉴는 빈 계정 목록 기준으로 한 번 정리
+        invoke("update_tray_accounts", { accounts: [], activeId: null }).catch(
+          () => {},
+        );
+        setConfig(defaultCfg);
+        setView("pet");
+        if (accCfg.accounts.length === 0) {
           invoke("open_onboarding_window").catch(() => {});
-        });
-      }
-    });
+        }
+      },
+    );
   }, []);
 
   // The standalone settings window emits `config-changed` after every
@@ -266,6 +334,24 @@ function PetApp() {
     const un = listen("config-changed", async () => {
       const cfg = await loadPlanConfig();
       if (cfg) setConfig(cfg);
+    });
+    return () => {
+      un.then((fn) => fn());
+    };
+  }, []);
+
+  // 트레이 메뉴의 "계정 전환 ▸ 라벨" 항목 클릭 시 Rust가 계정 id를 던진다.
+  // 이 핸들러가 실제 전환을 수행: AccountsConfig 갱신 → set_api_config /
+  // set_active_skin 푸시 → 트레이 메뉴 리빌드 → PlanConfig.skin 동기화.
+  // 메인 윈도우 어디에서든 받아 처리할 수 있어 PetApp 마운트 시 한 번만
+  // 등록한다.
+  useEffect(() => {
+    const un = listen<string>("tray-switch-account", async (e) => {
+      const targetId = e.payload;
+      const accCfg = await loadAccountsConfig();
+      if (!accCfg.accounts.some((a) => a.id === targetId)) return;
+      const next: AccountsConfig = { ...accCfg, activeAccountId: targetId };
+      await switchActiveAccount(next);
     });
     return () => {
       un.then((fn) => fn());
@@ -285,18 +371,15 @@ function PetApp() {
 // shared config store, lets the user edit, and broadcasts
 // `config-changed` so the pet window can re-read.
 function SettingsApp() {
-  const [config, setConfig] = useState<PlanConfig | null>(null);
-  const [apiConfig, setApiConfig] = useState<ApiConfig | null>(null);
+  const [accounts, setAccounts] = useState<AccountsConfig | null>(null);
   const [snap, setSnap] = useState<UsageSnapshot | null>(null);
 
   useEffect(() => {
     Promise.all([
-      loadPlanConfig(),
-      loadApiConfig(),
+      loadAccountsConfig(),
       invoke<UsageSnapshot>("get_usage_snapshot").catch(() => null),
-    ]).then(([cfg, api, s]) => {
-      setConfig(cfg);
-      setApiConfig(api);
+    ]).then(([acc, s]) => {
+      setAccounts(acc);
       if (s) setSnap(s);
     });
     const un = listen<UsageSnapshot>("usage-update", (e) => setSnap(e.payload));
@@ -305,7 +388,7 @@ function SettingsApp() {
     };
   }, []);
 
-  if (!config) return null;
+  if (!accounts) return null;
 
   const closeSelf = async () => {
     try {
@@ -315,28 +398,20 @@ function SettingsApp() {
     }
   };
 
+  // 모든 계정 변경(추가/삭제/활성 전환)을 한 경로로 모음.
+  // switchActiveAccount가 저장+Rust 푸시+트레이 리빌드+config-changed emit까지 처리.
+  const apply = async (next: AccountsConfig) => {
+    await switchActiveAccount(next);
+    setAccounts(next);
+  };
+
   return (
     <div className="settings-window">
       <Settings
-        config={config}
-        apiConfig={apiConfig}
+        accounts={accounts}
         snap={snap}
         onClose={closeSelf}
-        onSave={async (c) => {
-          await savePlanConfig(c);
-          setConfig(c);
-          await emit("config-changed");
-          await closeSelf();
-        }}
-        onApiSave={async (a) => {
-          await saveApiConfig(a);
-          await invoke("set_api_config", {
-            orgId: a?.orgId ?? null,
-            cookie: a?.cookie ?? null,
-          }).catch(() => {});
-          setApiConfig(a);
-          await emit("config-changed");
-        }}
+        onAccountsChange={apply}
       />
     </div>
   );
@@ -349,6 +424,7 @@ function SettingsApp() {
 // comes straight from claude.ai's API once the user pastes a cookie.
 function OnboardingApp() {
   const [skin, setSkin] = useState<string>(DEFAULT_SKIN_ID);
+  const [label, setLabel] = useState("메인 계정");
   const [orgId, setOrgId] = useState("");
   const [cookie, setCookie] = useState("");
   const [testStatus, setTestStatus] = useState<string>("");
@@ -382,20 +458,31 @@ function OnboardingApp() {
   };
 
   const finish = async () => {
-    // Save plan with default presets (legacy field; not user-visible
-    // anymore in API-only mode) plus the chosen skin.
-    const cfg: PlanConfig = {
-      plan: "max5x",
-      limits: PLAN_PRESETS.max5x,
-      skin,
-    };
-    await savePlanConfig(cfg);
+    // 자격증명을 채웠으면 첫 계정으로 등록, 아니면 빈 묶음으로 저장하고 종료.
+    // PlanConfig는 활성 계정 skin과 동기화될 derived 값이라 여기서 같이 저장.
     if (orgId.trim() && cookie.trim()) {
-      const api: ApiConfig = { orgId: orgId.trim(), cookie: cookie.trim() };
-      await saveApiConfig(api);
-      await invoke("set_api_config", api).catch(() => {});
+      const acc: Account = {
+        id: cryptoRandomId(),
+        label: label.trim() || "메인 계정",
+        orgId: orgId.trim(),
+        cookie: cookie.trim(),
+        skinId: skin,
+      };
+      const next: AccountsConfig = {
+        accounts: [acc],
+        activeAccountId: acc.id,
+      };
+      await switchActiveAccount(next);
+    } else {
+      // 건너뛰고 시작: plan만 저장하고 계정은 비워둠. 사용자가 설정에서 추가 가능.
+      const planCfg: PlanConfig = {
+        plan: "max5x",
+        limits: PLAN_PRESETS.max5x,
+        skin,
+      };
+      await savePlanConfig(planCfg);
+      await emit("config-changed");
     }
-    await emit("config-changed");
     await closeSelf();
   };
 
@@ -497,6 +584,16 @@ function OnboardingApp() {
               </p>
             </div>
 
+            <label>
+              계정 이름 (이 컴퓨터에서만 보임)
+              <input
+                type="text"
+                placeholder="메인 계정 / 회사 계정 / 서브 계정 …"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                spellCheck={false}
+              />
+            </label>
             <label>
               Organization ID
               <input
@@ -905,65 +1002,160 @@ function toneOf(remaining: number) {
 }
 
 function Settings({
-  config,
-  apiConfig,
+  accounts,
   snap,
   onClose,
-  onSave,
-  onApiSave,
+  onAccountsChange,
 }: {
-  config: PlanConfig;
-  apiConfig: ApiConfig | null;
+  accounts: AccountsConfig;
   snap: UsageSnapshot | null;
   onClose: () => void;
-  onSave: (c: PlanConfig) => void;
-  onApiSave: (a: ApiConfig | null) => void;
+  onAccountsChange: (next: AccountsConfig) => Promise<void> | void;
 }) {
-  const [skin, setSkin] = useState(config.skin);
-  const apiActive = !!snap?.api && Date.now() - Date.parse(snap.api.fetched_at) < 2 * 60 * 1000;
+  const apiActive =
+    !!snap?.api && Date.now() - Date.parse(snap.api.fetched_at) < 2 * 60 * 1000;
+  const apiError = snap?.api_error ?? null;
+  // 폼 모드: null = 닫힘, "new" = 새 계정 추가, "<id>" = 그 계정 편집.
+  const [formMode, setFormMode] = useState<null | "new" | string>(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  const setActive = async (id: string) => {
+    if (id === accounts.activeAccountId) return;
+    await onAccountsChange({ ...accounts, activeAccountId: id });
+  };
+
+  const removeAccount = async (id: string) => {
+    const remaining = accounts.accounts.filter((a) => a.id !== id);
+    let nextActive = accounts.activeAccountId;
+    if (id === accounts.activeAccountId) {
+      // 활성 계정 삭제 시 남은 첫 번째 계정으로 자동 활성화. 0개면 null.
+      nextActive = remaining[0]?.id ?? null;
+    }
+    await onAccountsChange({
+      accounts: remaining,
+      activeAccountId: nextActive,
+    });
+    if (formMode === id) setFormMode(null);
+  };
+
+  const addAccount = async (acc: Account) => {
+    const next: AccountsConfig = {
+      accounts: [...accounts.accounts, acc],
+      // 첫 계정이면 자동으로 활성. 아니면 기존 활성 유지(사용자가 카드 클릭으로 전환).
+      activeAccountId: accounts.activeAccountId ?? acc.id,
+    };
+    await onAccountsChange(next);
+    setFormMode(null);
+  };
+
+  const updateAccount = async (acc: Account) => {
+    // id를 키로 자리 교체. 활성 계정의 자격증명/skin이 바뀌었으면
+    // switchActiveAccount 헬퍼가 set_api_config·set_active_skin·트레이 메뉴
+    // 갱신까지 한 번에 처리한다 (onAccountsChange 경유).
+    const next: AccountsConfig = {
+      accounts: accounts.accounts.map((a) => (a.id === acc.id ? acc : a)),
+      activeAccountId: accounts.activeAccountId,
+    };
+    await onAccountsChange(next);
+    setFormMode(null);
+  };
+
+  const activeAccount = accounts.accounts.find(
+    (a) => a.id === accounts.activeAccountId,
+  );
 
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings" onClick={(e) => e.stopPropagation()}>
         <h2>설정</h2>
-        <div className="skin-picker">
-          <span className="skin-picker-label">캐릭터</span>
-          <div className="skin-grid">
-            {SKINS.map((s) => (
-              <button
-                type="button"
-                key={s.id}
-                className={`skin-tile ${skin === s.id ? "selected" : ""}`}
-                onClick={() => setSkin(s.id)}
-                title={s.name}
-              >
-                <img src={s.frames.good} alt={s.name} />
-                <span>{s.name}</span>
-              </button>
-            ))}
+
+        <div className="accounts-section">
+          <div className="accounts-head">
+            <span className="accounts-label">계정</span>
+            <button
+              type="button"
+              className="help-bell-btn"
+              onClick={() => setShowHelp((v) => !v)}
+              aria-label="API 연동 설명 보기"
+              title="어떻게 연결되는지 보기"
+            >
+              <span className="bell-icon" aria-hidden="true">🔔</span>
+              <span className="bell-text">어떻게 연결되나요?</span>
+            </button>
           </div>
+
+          {showHelp && <ApiHelpPopup />}
+
+          {activeAccount && apiActive && (
+            <p className="api-note ok">
+              ✓ <strong>{activeAccount.label}</strong>에서 실시간 사용량을
+              받고 있어요.
+            </p>
+          )}
+          {activeAccount && apiError && (
+            <p className="api-note err">⚠ API 오류: {apiError}</p>
+          )}
+          {!activeAccount && accounts.accounts.length === 0 && (
+            <p className="api-note">
+              아직 등록된 계정이 없어요. 아래 <strong>+ 새 계정</strong>에서
+              추가하세요.
+            </p>
+          )}
+
+          <div className="account-grid">
+            {accounts.accounts.map((acc) => (
+              <AccountCard
+                key={acc.id}
+                account={acc}
+                active={acc.id === accounts.activeAccountId}
+                editing={formMode === acc.id}
+                onActivate={() => setActive(acc.id)}
+                onRemove={() => removeAccount(acc.id)}
+                onEdit={() =>
+                  setFormMode(formMode === acc.id ? null : acc.id)
+                }
+              />
+            ))}
+            <button
+              type="button"
+              className={`account-tile add ${formMode === "new" ? "selected" : ""}`}
+              onClick={() => setFormMode(formMode === "new" ? null : "new")}
+            >
+              <span className="account-tile-plus">+</span>
+              <span>새 계정</span>
+            </button>
+          </div>
+
+          {formMode === "new" && (
+            <AccountForm
+              mode="new"
+              existingLabels={accounts.accounts.map((a) => a.label)}
+              onCancel={() => setFormMode(null)}
+              onSubmit={addAccount}
+            />
+          )}
+          {formMode &&
+            formMode !== "new" &&
+            (() => {
+              const target = accounts.accounts.find((a) => a.id === formMode);
+              if (!target) return null;
+              return (
+                <AccountForm
+                  mode="edit"
+                  existing={target}
+                  existingLabels={accounts.accounts
+                    .filter((a) => a.id !== target.id)
+                    .map((a) => a.label)}
+                  onCancel={() => setFormMode(null)}
+                  onSubmit={updateAccount}
+                />
+              );
+            })()}
         </div>
 
-        <ApiSection
-          apiConfig={apiConfig}
-          apiActive={apiActive}
-          apiError={snap?.api_error ?? null}
-          onSave={onApiSave}
-        />
-
         <div className="settings-actions">
-          <button onClick={onClose}>취소</button>
-          <button
-            className="primary"
-            onClick={() =>
-              onSave({
-                plan: config.plan,
-                limits: config.limits,
-                skin,
-              })
-            }
-          >
-            저장
+          <button className="primary" onClick={onClose}>
+            닫기
           </button>
         </div>
       </div>
@@ -971,24 +1163,100 @@ function Settings({
   );
 }
 
-function ApiSection({
-  apiConfig,
-  apiActive,
-  apiError,
-  onSave,
+function AccountCard({
+  account,
+  active,
+  editing,
+  onActivate,
+  onRemove,
+  onEdit,
 }: {
-  apiConfig: ApiConfig | null;
-  apiActive: boolean;
-  apiError: string | null;
-  onSave: (a: ApiConfig | null) => void;
+  account: Account;
+  active: boolean;
+  editing: boolean;
+  onActivate: () => void;
+  onRemove: () => void;
+  onEdit: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [orgId, setOrgId] = useState(apiConfig?.orgId ?? "");
-  const [cookie, setCookie] = useState(apiConfig?.cookie ?? "");
+  const skin = findSkin(account.skinId);
+  const orgTail = account.orgId.slice(-4);
+  // 카드 본체 클릭의 의미를 상태별로 갈라준다. 활성 카드를 또 활성화시키는
+  // 건 무의미하니, 그 클릭은 자연스레 "편집 열기"로 해석한다. 비활성 카드는
+  // 1차로 활성 전환, 두 번째 클릭(이젠 활성)에서 편집이 열리는 흐름.
+  // 활성 전환 없이 그냥 편집만 하고 싶을 때는 우상단 ✎ 버튼을 쓴다.
+  const handleBodyClick = () => {
+    if (active) onEdit();
+    else onActivate();
+  };
+  return (
+    <div
+      className={`account-tile ${active ? "selected" : ""} ${editing ? "editing" : ""}`}
+    >
+      <button
+        type="button"
+        className="account-tile-body"
+        onClick={handleBodyClick}
+        title={active ? "클릭해서 편집" : "이 계정으로 전환"}
+      >
+        <img src={skin.frames.good} alt={skin.name} />
+        <span className="account-tile-label">{account.label}</span>
+        <span className="account-tile-org">…{orgTail}</span>
+        {active && <span className="account-tile-badge">활성</span>}
+      </button>
+      <button
+        type="button"
+        className="account-tile-edit"
+        onClick={onEdit}
+        title="라벨·캐릭터·Org ID·쿠키 편집"
+        aria-label="이 계정 편집"
+      >
+        ✎
+      </button>
+      <button
+        type="button"
+        className="account-tile-remove"
+        onClick={onRemove}
+        title="이 계정 삭제"
+        aria-label="이 계정 삭제"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// 새 계정 추가와 기존 계정 편집 두 모드를 한 폼으로 처리. 새 모드에서는
+// 라벨 자동 생성·새 id 발급·"추가" 버튼, 편집 모드에서는 기존 값으로 채우고
+// id 보존·"저장" 버튼. 어느 모드든 onSubmit으로 완성된 Account를 부모에 넘긴다.
+function AccountForm({
+  mode,
+  existing,
+  existingLabels,
+  onCancel,
+  onSubmit,
+}: {
+  mode: "new" | "edit";
+  existing?: Account;
+  existingLabels: string[];
+  onCancel: () => void;
+  onSubmit: (acc: Account) => void;
+}) {
+  const [label, setLabel] = useState(() => {
+    if (mode === "edit" && existing) return existing.label;
+    if (existingLabels.length === 0) return "메인 계정";
+    if (!existingLabels.includes("서브 계정")) return "서브 계정";
+    return `계정 ${existingLabels.length + 1}`;
+  });
+  const [skin, setSkin] = useState(existing?.skinId ?? DEFAULT_SKIN_ID);
+  const [orgId, setOrgId] = useState(existing?.orgId ?? "");
+  const [cookie, setCookie] = useState(existing?.cookie ?? "");
   const [testStatus, setTestStatus] = useState<string>("");
-  const [showHelp, setShowHelp] = useState(false);
 
   const test = async () => {
+    if (!orgId.trim() || !cookie.trim()) {
+      setTestStatus("Org ID와 쿠키를 모두 채워주세요.");
+      return;
+    }
     setTestStatus("테스트 중...");
     try {
       const res = await invoke<{ five_hour_pct: number; weekly_pct: number }>(
@@ -996,139 +1264,138 @@ function ApiSection({
         { orgId: orgId.trim(), cookie: cookie.trim() },
       );
       setTestStatus(
-        `✓ 5h ${res.five_hour_pct.toFixed(0)}%, 주간 ${res.weekly_pct.toFixed(0)}%`,
+        `✓ 5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
       );
     } catch (e: unknown) {
       setTestStatus(`✗ ${String(e)}`);
     }
   };
 
+  const submit = () => {
+    if (!orgId.trim() || !cookie.trim()) {
+      setTestStatus("Org ID와 쿠키를 모두 채워주세요.");
+      return;
+    }
+    onSubmit({
+      id: existing?.id ?? cryptoRandomId(),
+      label: label.trim() || "이름 없음",
+      orgId: orgId.trim(),
+      cookie: cookie.trim(),
+      skinId: skin,
+    });
+  };
+
   return (
-    <div className="api-section">
-      <div className="api-section-head">
-        <button
-          className="link"
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? "API 연동 닫기" : "API 연동"}
-        </button>
-        <button
-          type="button"
-          className="help-bell-btn"
-          onClick={() => setShowHelp((v) => !v)}
-          aria-label="API 연동 설명 보기"
-          title="어떻게 연결되는지 보기"
-        >
-          <span className="bell-icon" aria-hidden="true">🔔</span>
-          <span className="bell-text">어떻게 연결되나요?</span>
-        </button>
+    <div className="account-form">
+      <div className="account-form-head">
+        {mode === "edit"
+          ? `계정 편집 — ${existing?.label ?? ""}`
+          : "새 계정 추가"}
       </div>
-      {showHelp && (
-        <div className="api-help-popup" role="note">
-          <div className="cookie-flow" aria-hidden="true">
-            <div className="cookie-flow-step">
-              <span className="cookie-flow-icon">🌐</span>
-              <span className="cookie-flow-label">claude.ai</span>
-            </div>
-            <span className="cookie-flow-arrow">→</span>
-            <div className="cookie-flow-step">
-              <span className="cookie-flow-icon">🍪</span>
-              <span className="cookie-flow-label">쿠키 5개</span>
-            </div>
-            <span className="cookie-flow-arrow">→</span>
-            <div className="cookie-flow-step">
-              <span className="cookie-flow-icon">🐼</span>
-              <span className="cookie-flow-label">이 앱</span>
-            </div>
-          </div>
-          <p>
-            🔒 <strong>이 컴퓨터 안에서만 돌아가요.</strong> Org ID와 쿠키는
-            macOS 사용자 폴더의 설정 파일
-            (<code>~/Library/Application Support/com.tnew.clauddeskpet/</code>) 한 곳에만 저장되고,
-            앱이 직접 <code>claude.ai/api/.../usage</code>를 30초마다 호출해 사용량을 가져옵니다.
-            <strong>외부 서버·분석 도구·텔레메트리 어디에도 전송하지 않아요.</strong>
-            "연동 해제"를 누르면 저장된 값은 즉시 지워집니다.
-          </p>
-          <p>
-            ⚠️ 단, 이 쿠키는 claude.ai 세션 전체 권한을 가지므로
-            <strong>다른 사람에게 보내거나 공용 컴퓨터에 두지 마세요.</strong>
-            의심스러운 곳에 붙여 넣지도 마시고요.
-          </p>
-          <p>
-            쿠키가 만료되거나 무효해지면 (HTTP 401·403·404) 다음 폴링에서 감지해
-            <strong> 이 설정 창이 자동으로 다시 열립니다.</strong> 그때 claude.ai에서 새 쿠키를 복사해 붙여넣으면 돼요.
-          </p>
-          <p>
-            쿠키는 claude.ai/settings/usage의 개발자도구 → Network → <code>usage</code> 요청 →
-            Request Headers의 <code>cookie</code> 줄 전체를 그대로 붙여넣으면 됩니다.
-            필요한 키 5개(<code>sessionKey</code>, <code>cf_clearance</code>, <code>__cf_bm</code>, <code>_cfuvid</code>, <code>routingHint</code>)만 사용하고 나머지는 무시돼요.
-          </p>
-        </div>
-      )}
-      {apiActive && !open && (
-        <p className="api-note ok">
-          ✓ Anthropic API에서 실시간 사용량을 받고 있어요.
-        </p>
-      )}
-      {apiError && !open && (
-        <p className="api-note err">⚠ API 오류: {apiError}</p>
-      )}
-      {open && (
-        <div className="api-form">
-          <label>
-            Organization ID
-            <input
-              type="text"
-              placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
-              value={orgId}
-              onChange={(e) => setOrgId(e.target.value)}
-              spellCheck={false}
-            />
-          </label>
-          <label>
-            세션 쿠키 (5개만)
-            <textarea
-              placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
-              value={cookie}
-              onChange={(e) => setCookie(e.target.value)}
-              rows={4}
-              spellCheck={false}
-            />
-          </label>
-          <div className="api-actions">
-            <button type="button" onClick={test}>
-              테스트
-            </button>
+      <label>
+        계정 이름
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          spellCheck={false}
+        />
+      </label>
+      <div className="skin-picker">
+        <span className="skin-picker-label">캐릭터</span>
+        <div className="skin-grid">
+          {SKINS.map((s) => (
             <button
               type="button"
-              className="primary slim"
-              onClick={() => {
-                if (orgId.trim() && cookie.trim()) {
-                  onSave({ orgId: orgId.trim(), cookie: cookie.trim() });
-                  setTestStatus("저장됨");
-                }
-              }}
+              key={s.id}
+              className={`skin-tile ${skin === s.id ? "selected" : ""}`}
+              onClick={() => setSkin(s.id)}
+              title={s.name}
             >
-              저장
+              <img src={s.frames.good} alt={s.name} />
+              <span>{s.name}</span>
             </button>
-            {apiConfig && (
-              <button
-                type="button"
-                onClick={() => {
-                  onSave(null);
-                  setOrgId("");
-                  setCookie("");
-                  setTestStatus("연동 해제됨");
-                }}
-              >
-                연동 해제
-              </button>
-            )}
-          </div>
-          {testStatus && <p className="api-status">{testStatus}</p>}
+          ))}
         </div>
-      )}
+      </div>
+      <label>
+        Organization ID
+        <input
+          type="text"
+          placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
+          value={orgId}
+          onChange={(e) => setOrgId(e.target.value)}
+          spellCheck={false}
+        />
+      </label>
+      <label>
+        세션 쿠키 (5개만)
+        <textarea
+          placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+          value={cookie}
+          onChange={(e) => setCookie(e.target.value)}
+          rows={4}
+          spellCheck={false}
+        />
+      </label>
+      <div className="api-actions">
+        <button type="button" onClick={test}>
+          테스트
+        </button>
+        <button type="button" className="primary slim" onClick={submit}>
+          {mode === "edit" ? "저장" : "추가"}
+        </button>
+        <button type="button" onClick={onCancel}>
+          취소
+        </button>
+      </div>
+      {testStatus && <p className="api-status">{testStatus}</p>}
+    </div>
+  );
+}
+
+function ApiHelpPopup() {
+  return (
+    <div className="api-help-popup" role="note">
+      <div className="cookie-flow" aria-hidden="true">
+        <div className="cookie-flow-step">
+          <span className="cookie-flow-icon">🌐</span>
+          <span className="cookie-flow-label">claude.ai</span>
+        </div>
+        <span className="cookie-flow-arrow">→</span>
+        <div className="cookie-flow-step">
+          <span className="cookie-flow-icon">🍪</span>
+          <span className="cookie-flow-label">쿠키 5개</span>
+        </div>
+        <span className="cookie-flow-arrow">→</span>
+        <div className="cookie-flow-step">
+          <span className="cookie-flow-icon">🐼</span>
+          <span className="cookie-flow-label">이 앱</span>
+        </div>
+      </div>
+      <p>
+        🔒 <strong>이 컴퓨터 안에서만 돌아가요.</strong> Org ID와 쿠키는
+        macOS 사용자 폴더의 설정 파일
+        (<code>~/Library/Application Support/com.tnew.clauddeskpet/</code>) 한 곳에만 저장되고,
+        앱이 직접 <code>claude.ai/api/.../usage</code>를 30초마다 호출해 사용량을 가져옵니다.
+        <strong>외부 서버·분석 도구·텔레메트리 어디에도 전송하지 않아요.</strong>
+        계정을 삭제하면 그 계정의 자격증명은 즉시 지워집니다.
+      </p>
+      <p>
+        ⚠️ 단, 이 쿠키는 claude.ai 세션 전체 권한을 가지므로
+        <strong>다른 사람에게 보내거나 공용 컴퓨터에 두지 마세요.</strong>
+        의심스러운 곳에 붙여 넣지도 마시고요.
+      </p>
+      <p>
+        쿠키가 만료되거나 무효해지면 (HTTP 401·403·404) 다음 폴링에서 감지해
+        <strong> 이 설정 창이 자동으로 다시 열립니다.</strong> 활성 계정의 쿠키를
+        새로 발급받아 그 계정을 삭제 후 같은 라벨로 다시 추가하면 돼요.
+      </p>
+      <p>
+        쿠키는 claude.ai/settings/usage의 개발자도구 → Network → <code>usage</code> 요청 →
+        Request Headers의 <code>cookie</code> 줄 전체를 그대로 붙여넣으면 됩니다.
+        필요한 키 5개(<code>sessionKey</code>, <code>cf_clearance</code>, <code>__cf_bm</code>, <code>_cfuvid</code>, <code>routingHint</code>)만 사용하고 나머지는 무시돼요.
+      </p>
     </div>
   );
 }

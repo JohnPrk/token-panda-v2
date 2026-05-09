@@ -38,6 +38,23 @@ export type ApiConfig = {
   cookie: string;
 };
 
+// 계정 1개 = 라벨 + claude.ai 자격증명 + 그 계정에 묶인 캐릭터.
+// 활성 계정의 자격증명만 폴링하고, 활성 계정의 skin이 메인 펫과 트레이
+// 아이콘에 동시에 반영된다. PlanConfig.skin은 활성 계정의 skinId를
+// 미러링하는 derived 값으로만 유지한다.
+export type Account = {
+  id: string;
+  label: string;
+  orgId: string;
+  cookie: string;
+  skinId: string;
+};
+
+export type AccountsConfig = {
+  accounts: Account[];
+  activeAccountId: string | null;
+};
+
 export type PlanId = "pro" | "max5x" | "max20x" | "custom";
 
 export type PlanLimits = {

@@ -10,9 +10,9 @@ use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
 #[cfg(target_os = "macos")]
 fn set_macos_accessory_app() {
@@ -27,7 +27,10 @@ fn set_macos_accessory_app() {
         // window with the regular Space mechanics, which is the only
         // configuration where the 'stationary' collection behavior is
         // honored reliably.
-        let _: () = msg_send![app, setActivationPolicy: 1i64];
+        // -[NSApplication setActivationPolicy:] returns BOOL. objc2 ≥0.5의
+        // 런타임 타입 검증이 () 반환을 거부하면서 panic("expected B, found v")
+        // 으로 부팅 자체가 막히던 회귀. 명시적으로 bool로 받음.
+        let _: bool = msg_send![app, setActivationPolicy: 1i64];
     }
 }
 
@@ -369,7 +372,8 @@ fn settings_focus(app: AppHandle, open: bool) -> Result<(), String> {
                         let nsapp_cls = class!(NSApplication);
                         let nsapp: *mut AnyObject =
                             msg_send![nsapp_cls, sharedApplication];
-                        let _: () = msg_send![nsapp, activateIgnoringOtherApps: true];
+                        // BOOL 반환. 위 setActivationPolicy 케이스와 같은 이유로 bool 명시.
+                        let _: bool = msg_send![nsapp, activateIgnoringOtherApps: true];
                         let nil: *const AnyObject = std::ptr::null();
                         let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
                     }
@@ -424,24 +428,54 @@ fn set_tray_title(app: AppHandle, title: String) -> Result<(), String> {
     Ok(())
 }
 
-// Bamboo tray icon swap by 5h remaining %. Called from JS alongside
-// set_tray_title so the menu-bar bamboo "loses leaves" as quota drops.
-const TRAY_ICON_100: &[u8] = include_bytes!("../icons/tray/tray-100.png");
-const TRAY_ICON_75: &[u8] = include_bytes!("../icons/tray/tray-75.png");
-const TRAY_ICON_50: &[u8] = include_bytes!("../icons/tray/tray-50.png");
-const TRAY_ICON_25: &[u8] = include_bytes!("../icons/tray/tray-25.png");
+// Tray icon assets keyed by (skin, 4-tier 잔여%). 지금은 판다 1종만 등록돼
+// 있고, 다른 캐릭터를 추가할 때 같은 위치에 `tray-<skin>-{100,75,50,25}.png`
+// 4개를 넣고 `tray_icon_bytes`의 match에 분기를 더하면 트레이 메뉴 전환만으로
+// 아이콘이 갈아끼워진다.
+const TRAY_ICON_PANDA_100: &[u8] = include_bytes!("../icons/tray/tray-100.png");
+const TRAY_ICON_PANDA_75: &[u8] = include_bytes!("../icons/tray/tray-75.png");
+const TRAY_ICON_PANDA_50: &[u8] = include_bytes!("../icons/tray/tray-50.png");
+const TRAY_ICON_PANDA_25: &[u8] = include_bytes!("../icons/tray/tray-25.png");
+
+fn tray_icon_bytes(skin_id: &str, remaining: f64) -> &'static [u8] {
+    let panda_tier = |r: f64| -> &'static [u8] {
+        if r >= 0.75 {
+            TRAY_ICON_PANDA_100
+        } else if r >= 0.50 {
+            TRAY_ICON_PANDA_75
+        } else if r >= 0.25 {
+            TRAY_ICON_PANDA_50
+        } else {
+            TRAY_ICON_PANDA_25
+        }
+    };
+    match skin_id {
+        "panda" => panda_tier(remaining),
+        // 알 수 없는 skin은 판다 fallback. 새 캐릭터는 여기에 분기 추가.
+        _ => panda_tier(remaining),
+    }
+}
+
+// 활성 계정의 skin id. set_active_skin에서 갱신되고
+// set_tray_icon_for_remaining에서 읽어 4-tier PNG 분기에 사용.
+fn active_skin_state() -> &'static Mutex<String> {
+    static CELL: OnceLock<Mutex<String>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new("panda".to_string()))
+}
+
+#[tauri::command]
+fn set_active_skin(skin_id: String) -> Result<(), String> {
+    let trimmed = skin_id.trim();
+    if !trimmed.is_empty() {
+        *active_skin_state().lock() = trimmed.to_string();
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn set_tray_icon_for_remaining(app: AppHandle, remaining: f64) -> Result<(), String> {
-    let bytes: &[u8] = if remaining >= 0.75 {
-        TRAY_ICON_100
-    } else if remaining >= 0.50 {
-        TRAY_ICON_75
-    } else if remaining >= 0.25 {
-        TRAY_ICON_50
-    } else {
-        TRAY_ICON_25
-    };
+    let skin = active_skin_state().lock().clone();
+    let bytes = tray_icon_bytes(&skin, remaining);
     if let Some(tray) = app.tray_by_id("main-tray") {
         let img = tauri::image::Image::from_bytes(bytes).map_err(|e| e.to_string())?;
         tray.set_icon(Some(img)).map_err(|e| e.to_string())?;
@@ -473,7 +507,8 @@ fn focus_for_input(app: AppHandle) -> Result<(), String> {
             let nsapp: *mut AnyObject = msg_send![nsapp_cls, sharedApplication];
             // 'true' here is fine for our accessory app — there's no Dock
             // icon to flash and we want keyboard input to flow.
-            let _: () = msg_send![nsapp, activateIgnoringOtherApps: true];
+            // BOOL 반환. objc2 런타임 검증 통과를 위해 bool 명시.
+            let _: bool = msg_send![nsapp, activateIgnoringOtherApps: true];
 
             if let Ok(ptr) = window.ns_window() {
                 let ns_window = ptr as *mut AnyObject;
@@ -671,29 +706,99 @@ fn start_watcher(app: AppHandle) -> Arc<WatcherState> {
     state
 }
 
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    // 우클릭/클릭 메뉴 맨 위에 현재 버전 라벨(비활성). CARGO_PKG_VERSION이
-    // tauri.conf.json/package.json과 동기화돼 있어서 빌드 시점 버전이 박힘.
+#[derive(serde::Deserialize)]
+struct AccountMeta {
+    id: String,
+    label: String,
+}
+
+// 트레이 메뉴를 항상 같은 골격으로 짠다: 버전(비활성) / 보이기 / 새로고침 /
+// (계정이 1개 이상이면) 계정 전환 ▸ … / 설정 / 종료. accounts가 비어 있으면
+// 서브메뉴를 끼우지 않아 사용자에게 빈 카테고리가 보이지 않게 한다.
+fn build_menu(
+    app: &AppHandle,
+    accounts: &[AccountMeta],
+    active_id: Option<&str>,
+) -> tauri::Result<Menu<Wry>> {
     let version_label = format!("토큰 판다 v{}", env!("CARGO_PKG_VERSION"));
     let version_item = MenuItem::with_id(app, "version", &version_label, false, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", "펫 보이기/숨기기", true, None::<&str>)?;
     let refresh_item = MenuItem::with_id(app, "refresh", "지금 새로고침", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "설정...", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[&version_item, &show_item, &refresh_item, &settings_item, &quit_item],
-    )?;
+
+    // 계정 항목들. 활성 계정 앞에 `● `, 비활성에는 `○ `를 붙여 라디오 표시.
+    // (Tauri 2.x의 CheckMenuItem은 macOS 트레이에서 라벨 정렬이 들쭉날쭉해서
+    // 텍스트 prefix가 더 안정적이라 이걸 선택.)
+    let mut account_items: Vec<MenuItem<Wry>> = Vec::with_capacity(accounts.len());
+    for acc in accounts {
+        let prefix = if active_id == Some(acc.id.as_str()) {
+            "● "
+        } else {
+            "○ "
+        };
+        let label = format!("{}{}", prefix, acc.label);
+        let id = format!("account-{}", acc.id);
+        account_items.push(MenuItem::with_id(app, &id, &label, true, None::<&str>)?);
+    }
+
+    let submenu_opt: Option<Submenu<Wry>> = if account_items.is_empty() {
+        None
+    } else {
+        let item_refs: Vec<&dyn IsMenuItem<Wry>> = account_items
+            .iter()
+            .map(|i| i as &dyn IsMenuItem<Wry>)
+            .collect();
+        Some(Submenu::with_id_and_items(
+            app,
+            "accounts",
+            "계정 전환",
+            true,
+            &item_refs,
+        )?)
+    };
+
+    let mut top_refs: Vec<&dyn IsMenuItem<Wry>> = Vec::new();
+    top_refs.push(&version_item);
+    top_refs.push(&show_item);
+    top_refs.push(&refresh_item);
+    if let Some(ref sub) = submenu_opt {
+        top_refs.push(sub);
+    }
+    top_refs.push(&settings_item);
+    top_refs.push(&quit_item);
+
+    Menu::with_items(app, &top_refs)
+}
+
+#[tauri::command]
+fn update_tray_accounts(
+    app: AppHandle,
+    accounts: Vec<AccountMeta>,
+    active_id: Option<String>,
+) -> Result<(), String> {
+    let menu = build_menu(&app, &accounts, active_id.as_deref()).map_err(|e| e.to_string())?;
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    // 첫 부팅에는 계정 정보를 모르니 빈 메뉴로 짓고, 메인 webview가 부트할 때
+    // update_tray_accounts로 계정 서브메뉴를 채워넣는다.
+    let menu = build_menu(app, &[], None)?;
 
     // 4-tier bamboo tray icons keyed to 5h remaining %:
-    //   100~75 → tray-100.png (full bamboo, 4 stalks)
-    //    74~50 → tray-75.png  (3 stalks)
-    //    49~25 → tray-50.png  (2 stalks)
-    //    24~0  → tray-25.png  (1 stalk)
+    //   100~75 → tray-panda-100 (full bamboo, 4 stalks)
+    //    74~50 → tray-panda-75  (3 stalks)
+    //    49~25 → tray-panda-50  (2 stalks)
+    //    24~0  → tray-panda-25  (1 stalk)
     // Initial render uses the 100% tier; set_tray_icon_for_remaining()
-    // swaps the icon as the polling loop pushes new percentages.
-    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray/tray-100.png"))
-        .expect("tray-100.png must be a valid PNG");
+    // swaps the icon as the polling loop pushes new percentages, with
+    // the active skin id from set_active_skin selecting the asset family.
+    let tray_icon = tauri::image::Image::from_bytes(TRAY_ICON_PANDA_100)
+        .expect("tray-panda-100 must be a valid PNG");
     // The user-supplied bamboo PNGs are full-color (green stalks + leaves),
     // so we render them as-is. icon_as_template(true) would force macOS to
     // re-tint only black pixels and discard the color, which broke live
@@ -704,25 +809,35 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon_as_template(false)
         .title("…")
         .menu(&menu)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
+        .on_menu_event(|app, event| {
+            let id = event.id.as_ref();
+            // 계정 전환 클릭은 webview 쪽에서 store/Rust 모두 한 트랜잭션으로
+            // 처리해야 해서, Rust는 id만 던지고 webview의 `tray-switch-account`
+            // 리스너가 실제 전환을 수행한다 (App.tsx의 switchActiveAccount).
+            if let Some(acc_id) = id.strip_prefix("account-") {
+                let _ = app.emit("tray-switch-account", acc_id.to_string());
+                return;
+            }
+            match id {
+                "show" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
                     }
                 }
+                "refresh" => {
+                    let _ = refresh_usage(app.clone());
+                }
+                "settings" => {
+                    let _ = open_settings_window(app.clone());
+                }
+                "quit" => app.exit(0),
+                _ => {}
             }
-            "refresh" => {
-                let _ = refresh_usage(app.clone());
-            }
-            "settings" => {
-                let _ = open_settings_window(app.clone());
-            }
-            "quit" => app.exit(0),
-            _ => {}
         })
         // No on_tray_icon_event: a left-click on the tray title now just
         // opens the menu (the macOS default when a menu is set). The pet
@@ -826,6 +941,8 @@ pub fn run() {
             claude_projects_path,
             set_tray_title,
             set_tray_icon_for_remaining,
+            set_active_skin,
+            update_tray_accounts,
             toggle_main_window,
             focus_for_input,
             set_api_config,

@@ -1689,3 +1689,207 @@
 .preview-stage .character[data-flash="hit"][data-state] {
   animation: hit-glow-pulse 1.4s ease-in-out infinite !important;
 }
+
+/* ───────── 멀티 계정 카드 그리드 ─────────
+   .skin-tile 톤(보라 글로우 = 선택)을 그대로 재활용하되, 카드에 라벨·
+   orgId 끝 4자리·활성 배지·✕ 삭제 버튼을 얹어야 해서 전용 클래스로
+   분리. 캐릭터 갈아끼우는 느낌의 UX가 멀티 계정의 본질이라 캐릭터
+   썸네일이 카드의 시각적 중심이다. */
+.accounts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.accounts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.accounts-label {
+  font-size: 11px;
+  color: #555;
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 10px;
+}
+.account-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 0;
+  transition: border-color 0.15s ease, transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.account-tile:hover {
+  border-color: #b8a4ff;
+  transform: translateY(-1px);
+}
+.account-tile.selected {
+  border-color: #6b4cff;
+  box-shadow: 0 0 0 2px rgba(107, 76, 255, 0.18);
+}
+.account-tile-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+.account-tile-body img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  pointer-events: none;
+}
+.account-tile-label {
+  font-size: 12px;
+  color: #2a2a32;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-tile-org {
+  font-size: 10px;
+  color: #6b6479;
+  letter-spacing: 0.05em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.account-tile-badge {
+  margin-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #6b4cff;
+  background: rgba(107, 76, 255, 0.12);
+  border-radius: 8px;
+  padding: 2px 6px;
+}
+.account-tile-edit,
+.account-tile-remove {
+  position: absolute;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #6b6479;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.account-tile-edit { right: 28px; }
+.account-tile-remove { right: 4px; }
+.account-tile:hover .account-tile-edit,
+.account-tile:hover .account-tile-remove,
+.account-tile.selected .account-tile-edit,
+.account-tile.selected .account-tile-remove,
+.account-tile.editing .account-tile-edit,
+.account-tile.editing .account-tile-remove {
+  opacity: 1;
+}
+.account-tile-edit:hover {
+  background: rgba(107, 76, 255, 0.14);
+  color: #6b4cff;
+}
+.account-tile-remove:hover {
+  background: #fbecec;
+  color: #8a2c2c;
+}
+.account-tile.editing {
+  border-color: #6b4cff;
+  background: rgba(107, 76, 255, 0.06);
+}
+.account-tile.add {
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+  border: 2px dashed rgba(107, 76, 255, 0.35);
+  background: transparent;
+  cursor: pointer;
+  color: #6b4cff;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+}
+.account-tile.add:hover {
+  background: rgba(107, 76, 255, 0.06);
+  border-color: #6b4cff;
+  transform: translateY(-1px);
+}
+.account-tile-plus {
+  font-size: 22px;
+  line-height: 1;
+}
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(107, 76, 255, 0.04);
+  border: 1px solid rgba(107, 76, 255, 0.18);
+  border-radius: 10px;
+}
+.account-form-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b4cff;
+  margin-bottom: 2px;
+}
+.account-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #555;
+}
+.account-form input,
+.account-form textarea {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid #c4bcd6;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f1d28;
+}
+.account-form textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+@media (prefers-color-scheme: dark) {
+  .accounts-label { color: #aaa; }
+  .account-tile-label { color: #ececf6; }
+  .account-tile-org { color: #aaa6b8; }
+  .account-tile-remove {
+    background: rgba(50, 48, 64, 0.7);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #cfc8dc;
+  }
+  .account-tile.add { color: #b8a4ff; }
+  /* settings 윈도우는 고정 라이트 표면이라 스코프 밖에서만 다크 톤. */
+  body:not(.settings-window-host) .account-form {
+    background: rgba(155, 133, 255, 0.08);
+    border-color: rgba(155, 133, 255, 0.25);
+  }
+}
