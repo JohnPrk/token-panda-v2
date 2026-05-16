@@ -205,3 +205,126 @@ pub fn fetch_usage(org_id: &str, cookie: &str) -> Result<ApiUsage, String> {
         fetched_at: Utc::now(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ===== sanitize_cookie — Slack/Notion/Discord 마크다운 autolink 제거 =====
+
+    #[test]
+    fn sanitize_passes_through_plain_cookie() {
+        let raw = "sessionKey=abc; foo=bar";
+        assert_eq!(sanitize_cookie(raw), "sessionKey=abc; foo=bar");
+    }
+
+    #[test]
+    fn sanitize_strips_markdown_autolink() {
+        // [sessionKey=abc](http://sessionKey=abc) → sessionKey=abc
+        let raw = "[sessionKey=abc](http://sessionKey=abc); foo=bar";
+        assert_eq!(sanitize_cookie(raw), "sessionKey=abc; foo=bar");
+    }
+
+    #[test]
+    fn sanitize_keeps_inner_text_when_lone_brackets() {
+        let raw = "[abc]; foo";
+        assert_eq!(sanitize_cookie(raw), "abc; foo");
+    }
+
+    #[test]
+    fn sanitize_collapses_whitespace_and_newlines() {
+        let raw = "a=1\n\nb=2   c=3";
+        assert_eq!(sanitize_cookie(raw), "a=1 b=2 c=3");
+    }
+
+    // ===== pick_utilization — 0-100 / 0-1 / buckets =====
+
+    #[test]
+    fn pick_utilization_returns_pct_when_value_is_large() {
+        let w = json!({"utilization": 76.0});
+        assert_eq!(pick_utilization(&w), Some(76.0));
+    }
+
+    #[test]
+    fn pick_utilization_scales_fraction_to_pct() {
+        // value <= 1.5 → 분수로 해석, * 100
+        let w = json!({"utilization": 0.76});
+        assert_eq!(pick_utilization(&w), Some(76.0));
+    }
+
+    #[test]
+    fn pick_utilization_tries_alternate_keys() {
+        let w = json!({"percent_used": 42.0});
+        assert_eq!(pick_utilization(&w), Some(42.0));
+    }
+
+    #[test]
+    fn pick_utilization_takes_max_across_buckets() {
+        let w = json!({
+            "buckets": [
+                {"utilization": 30.0},
+                {"utilization": 80.0},
+                {"utilization": 50.0}
+            ]
+        });
+        assert_eq!(pick_utilization(&w), Some(80.0));
+    }
+
+    #[test]
+    fn pick_utilization_returns_none_when_no_field() {
+        let w = json!({"unrelated": 1});
+        assert_eq!(pick_utilization(&w), None);
+    }
+
+    // ===== pick_reset — RFC3339 파싱 =====
+
+    #[test]
+    fn pick_reset_parses_resets_at_rfc3339() {
+        let w = json!({"resets_at": "2026-05-16T13:00:00Z"});
+        let r = pick_reset(&w).expect("should parse");
+        assert_eq!(r.to_rfc3339(), "2026-05-16T13:00:00+00:00");
+    }
+
+    #[test]
+    fn pick_reset_tries_alternate_keys() {
+        let w = json!({"ends_at": "2026-05-16T13:00:00+09:00"});
+        assert!(pick_reset(&w).is_some());
+    }
+
+    #[test]
+    fn pick_reset_returns_none_on_garbage_or_missing() {
+        assert_eq!(pick_reset(&json!({"resets_at": "not a date"})), None);
+        assert_eq!(pick_reset(&json!({})), None);
+    }
+
+    // ===== extract_window — 키 우선순위 =====
+
+    #[test]
+    fn extract_window_uses_first_matching_key() {
+        let root = json!({
+            "five_hour": {"utilization": 76.0},
+            "five_hour_limit": {"utilization": 99.0}
+        });
+        let (util, _) = extract_window(&root, &["five_hour", "five_hour_limit"]);
+        assert_eq!(util, Some(76.0));
+    }
+
+    #[test]
+    fn extract_window_falls_through_to_later_keys() {
+        let root = json!({"seven_day": {"utilization": 0.42}});
+        let (util, _) = extract_window(
+            &root,
+            &["weekly", "weekly_limit", "seven_day"],
+        );
+        assert_eq!(util, Some(42.0));
+    }
+
+    #[test]
+    fn extract_window_returns_none_pair_when_no_keys_match() {
+        let root = json!({"foo": 1});
+        let (util, reset) = extract_window(&root, &["bar", "baz"]);
+        assert_eq!(util, None);
+        assert!(reset.is_none());
+    }
+}

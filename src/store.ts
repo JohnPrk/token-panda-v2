@@ -29,25 +29,50 @@ export async function savePlanConfig(cfg: PlanConfig): Promise<void> {
 export async function loadAccountsConfig(): Promise<AccountsConfig> {
   const store = await getStore();
   const existing = await store.get<AccountsConfig>(KEY_ACCOUNTS);
-  if (existing && Array.isArray(existing.accounts)) {
-    return existing;
-  }
   const oldApi = await store.get<ApiConfig>(KEY_API);
   const oldPlan = await store.get<PlanConfig>(KEY_PLAN);
+  const { config, needsWrite } = buildAccountsConfigFromLegacy(
+    existing ?? null,
+    oldApi ?? null,
+    oldPlan ?? null,
+    cryptoRandomId,
+  );
+  if (needsWrite) {
+    await store.set(KEY_ACCOUNTS, config);
+    await store.save();
+  }
+  return config;
+}
+
+// Tauri Store에서 읽어온 세 값을 받아 어떤 AccountsConfig가 결과인지 + 새로
+// 디스크에 써야 하는지 결정하는 pure 함수. `loadAccountsConfig`의 IO 본체와
+// 분리해 cryptoRandomId만 의존성으로 주입한다. cargo test 대신 vitest로 검증.
+export function buildAccountsConfigFromLegacy(
+  existing: AccountsConfig | null,
+  oldApi: ApiConfig | null,
+  oldPlan: PlanConfig | null,
+  idGen: () => string,
+): { config: AccountsConfig; needsWrite: boolean } {
+  if (existing && Array.isArray(existing.accounts)) {
+    return { config: existing, needsWrite: false };
+  }
   if (oldApi && oldApi.orgId && oldApi.cookie) {
     const acc: Account = {
-      id: cryptoRandomId(),
+      id: idGen(),
       label: "메인 계정",
       orgId: oldApi.orgId,
       cookie: oldApi.cookie,
       skinId: oldPlan?.skin ?? "panda",
     };
-    const cfg: AccountsConfig = { accounts: [acc], activeAccountId: acc.id };
-    await store.set(KEY_ACCOUNTS, cfg);
-    await store.save();
-    return cfg;
+    return {
+      config: { accounts: [acc], activeAccountId: acc.id },
+      needsWrite: true,
+    };
   }
-  return { accounts: [], activeAccountId: null };
+  return {
+    config: { accounts: [], activeAccountId: null },
+    needsWrite: false,
+  };
 }
 
 export async function saveAccountsConfig(cfg: AccountsConfig): Promise<void> {

@@ -720,6 +720,19 @@ struct AccountMeta {
 static UPDATE_INFO: OnceLock<parking_lot::Mutex<Option<updater::UpdateInfo>>> = OnceLock::new();
 static TRAY_ACCOUNTS_CACHE: OnceLock<parking_lot::Mutex<(Vec<AccountMeta>, Option<String>)>> =
     OnceLock::new();
+
+// 트레이 메뉴 "표시 모드 ▸" 서브메뉴의 라디오 표시(● vs ○)를 그리려면 현재 mode를
+// 알아야 한다. webview가 부트 시 + 메뉴에서 토글 시 update_tray_mode 커맨드로 푸시.
+// 기본값은 v1.24까지의 동작인 FiveHour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum TrayMode {
+    #[default]
+    Fivehour,
+    Both,
+}
+
+static TRAY_MODE: OnceLock<parking_lot::Mutex<TrayMode>> = OnceLock::new();
 // 설치 클릭이 진행 중일 때 중복 트리거 차단. 사용자가 메뉴를 다시 펴서 "설치"를
 // 여러 번 누르는 케이스 보호.
 static INSTALL_IN_PROGRESS: OnceLock<AtomicBool> = OnceLock::new();
@@ -735,6 +748,10 @@ fn tray_accounts_cache_lock(
 
 fn install_in_progress() -> &'static AtomicBool {
     INSTALL_IN_PROGRESS.get_or_init(|| AtomicBool::new(false))
+}
+
+fn tray_mode_lock() -> &'static parking_lot::Mutex<TrayMode> {
+    TRAY_MODE.get_or_init(|| parking_lot::Mutex::new(TrayMode::default()))
 }
 
 fn rebuild_tray_menu(app: &AppHandle) -> Result<(), String> {
@@ -815,6 +832,37 @@ fn build_menu(
         )?)
     };
 
+    // "표시 모드 ▸" 서브메뉴. 계정 전환과 같은 prefix 라디오 패턴(● 선택 / ○ 미선택).
+    // 클릭 시 메뉴 이벤트 핸들러가 webview로 tray-set-mode를 emit하고, webview가
+    // PlanConfig를 저장한 뒤 update_tray_mode로 라디오 표시를 갱신한다.
+    let mode = *tray_mode_lock().lock();
+    let mode_fivehour_label = format!(
+        "{} 5h만",
+        if mode == TrayMode::Fivehour { "●" } else { "○" }
+    );
+    let mode_both_label = format!(
+        "{} 5h + 주간",
+        if mode == TrayMode::Both { "●" } else { "○" }
+    );
+    let mode_fivehour_item = MenuItem::with_id(
+        app,
+        "mode-fivehour",
+        &mode_fivehour_label,
+        true,
+        None::<&str>,
+    )?;
+    let mode_both_item = MenuItem::with_id(app, "mode-both", &mode_both_label, true, None::<&str>)?;
+    let mode_submenu = Submenu::with_id_and_items(
+        app,
+        "tray-mode",
+        "표시 모드",
+        true,
+        &[
+            &mode_fivehour_item as &dyn IsMenuItem<Wry>,
+            &mode_both_item as &dyn IsMenuItem<Wry>,
+        ],
+    )?;
+
     let mut top_refs: Vec<&dyn IsMenuItem<Wry>> = Vec::new();
     top_refs.push(&version_item);
     if let Some(ref item) = update_item {
@@ -825,6 +873,7 @@ fn build_menu(
     if let Some(ref sub) = submenu_opt {
         top_refs.push(sub);
     }
+    top_refs.push(&mode_submenu);
     top_refs.push(&settings_item);
     top_refs.push(&quit_item);
 
@@ -840,6 +889,15 @@ fn update_tray_accounts(
     {
         let mut lock = tray_accounts_cache_lock().lock();
         *lock = (accounts, active_id);
+    }
+    rebuild_tray_menu(&app)
+}
+
+#[tauri::command]
+fn update_tray_mode(app: AppHandle, mode: TrayMode) -> Result<(), String> {
+    {
+        let mut lock = tray_mode_lock().lock();
+        *lock = mode;
     }
     rebuild_tray_menu(&app)
 }
@@ -895,6 +953,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 "settings" => {
                     let _ = open_settings_window(app.clone());
+                }
+                "mode-fivehour" => {
+                    let _ = app.emit("tray-set-mode", "fivehour");
+                }
+                "mode-both" => {
+                    let _ = app.emit("tray-set-mode", "both");
                 }
                 "install_update" => {
                     // 사용자가 메뉴를 여러 번 펴서 "설치"를 연타하는 케이스 방어.
@@ -1104,6 +1168,7 @@ pub fn run() {
             set_tray_icon_for_remaining,
             set_active_skin,
             update_tray_accounts,
+            update_tray_mode,
             toggle_main_window,
             focus_for_input,
             set_api_config,

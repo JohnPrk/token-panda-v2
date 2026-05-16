@@ -129,6 +129,27 @@ export function formatRemain(ms: number): string {
   return `${mm}:${ss.toString().padStart(2, "0")}`;
 }
 
+// 트레이 라벨에 어떤 정보를 박을지를 사용자가 메뉴에서 선택할 수 있도록 분기.
+// "fivehour" → 현재처럼 5h 남은 % 만, "both" → 5h % + 주간 % 같이.
+export type TrayMode = "fivehour" | "both";
+
+export function formatTrayLabel(
+  mode: TrayMode,
+  fiveHourRemaining: number, // 0–1
+  weeklyRemaining: number, // 0–1
+): string {
+  const five = Math.round(clampUnit(fiveHourRemaining) * 100);
+  if (mode === "fivehour") return `${five}%`;
+  const weekly = Math.round(clampUnit(weeklyRemaining) * 100);
+  return `${five}% · 주 ${weekly}%`;
+}
+
+function clampUnit(v: number): number {
+  if (!Number.isFinite(v) || v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
 export function formatResetCountdown(ms: number): string {
   if (ms <= 0) return "곧 초기화";
   const totalMin = Math.floor(ms / 60000);

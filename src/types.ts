@@ -66,7 +66,13 @@ export type PlanConfig = {
   plan: PlanId;
   limits: PlanLimits;
   skin: string;
+  /** 트레이 메뉴바 텍스트에 무엇을 표시할지. 기본은 v1.24까지의 동작인 "fivehour".
+   *  v1.25부터 사용자가 트레이 메뉴 "표시 모드 ▸"에서 토글 가능. legacy store에는
+   *  이 필드가 없을 수 있어 loadPlanConfig가 기본값을 채워준다. */
+  trayMode?: TrayMode;
 };
+
+export type TrayMode = "fivehour" | "both";
 
 // Anthropic does not publish exact 5h/weekly token limits per plan.
 // Used only as fallback when the API path isn't configured.

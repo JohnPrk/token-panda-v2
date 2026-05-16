@@ -355,3 +355,104 @@ pub fn snapshot() -> UsageSnapshot {
         now,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn ts(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    fn assistant(ts_str: &str) -> ParsedEntry {
+        ParsedEntry {
+            timestamp: ts(ts_str),
+            role: Role::Assistant,
+            tokens: 0,
+            cache_hit: false,
+        }
+    }
+
+    // ===== has_tool_result =====
+
+    #[test]
+    fn has_tool_result_false_when_content_none() {
+        assert!(!has_tool_result(None));
+    }
+
+    #[test]
+    fn has_tool_result_false_when_content_not_array() {
+        let v = json!({"type": "tool_result"});
+        assert!(!has_tool_result(Some(&v)));
+    }
+
+    #[test]
+    fn has_tool_result_true_when_item_type_is_tool_result() {
+        let v = json!([{"type": "text", "text": "hi"}, {"type": "tool_result"}]);
+        assert!(has_tool_result(Some(&v)));
+    }
+
+    #[test]
+    fn has_tool_result_false_when_no_tool_result_in_array() {
+        let v = json!([{"type": "text"}, {"type": "image"}]);
+        assert!(!has_tool_result(Some(&v)));
+    }
+
+    // ===== five_hour_window_start =====
+
+    #[test]
+    fn window_none_when_empty() {
+        let now = ts("2026-05-16T12:00:00Z");
+        assert_eq!(five_hour_window_start(&[], now), None);
+    }
+
+    #[test]
+    fn window_anchored_at_first_message_within_5h() {
+        let e1 = assistant("2026-05-16T10:00:00Z");
+        let e2 = assistant("2026-05-16T11:30:00Z");
+        let now = ts("2026-05-16T12:00:00Z");
+        let start = five_hour_window_start(&[&e1, &e2], now);
+        assert_eq!(start, Some(ts("2026-05-16T10:00:00Z")));
+    }
+
+    #[test]
+    fn window_re_anchors_when_previous_5h_lapsed() {
+        // 10:00 첫 메시지 → 15:00에 윈도우 만료. 15:30 메시지가 새 윈도우 시작.
+        let e1 = assistant("2026-05-16T10:00:00Z");
+        let e2 = assistant("2026-05-16T15:30:00Z");
+        let now = ts("2026-05-16T17:00:00Z");
+        let start = five_hour_window_start(&[&e1, &e2], now);
+        assert_eq!(start, Some(ts("2026-05-16T15:30:00Z")));
+    }
+
+    #[test]
+    fn window_none_when_latest_is_expired() {
+        // 10:00 한 번 보내고 한참 idle. now=20:00이면 마지막 윈도우(10:00~15:00)도 만료.
+        let e1 = assistant("2026-05-16T10:00:00Z");
+        let now = ts("2026-05-16T20:00:00Z");
+        assert_eq!(five_hour_window_start(&[&e1], now), None);
+    }
+
+    // ===== next_weekday_at (Seoul 기준) =====
+
+    #[test]
+    fn next_weekday_at_jumps_a_week_when_same_day_already_past() {
+        // KST 월요일 14:00 → 같은 월요일 09:00 요청 → 다음 주 월요일 09:00 반환
+        // 월요일 14:00 KST = 월요일 05:00 UTC
+        let now_utc = ts("2026-05-18T05:00:00Z"); // 월요일
+        let target = next_weekday_at(now_utc, Weekday::Mon, 9, 0);
+        // 다음 월요일 09:00 KST = 다음 월요일 00:00 UTC
+        assert_eq!(target, ts("2026-05-25T00:00:00Z"));
+    }
+
+    #[test]
+    fn next_weekday_at_returns_today_when_future() {
+        // KST 월요일 08:00 → 같은 월요일 09:00 요청 → 같은 날 09:00 반환
+        // 월요일 08:00 KST = 일요일 23:00 UTC
+        let now_utc = ts("2026-05-17T23:00:00Z");
+        let target = next_weekday_at(now_utc, Weekday::Mon, 9, 0);
+        // 같은 월요일 09:00 KST = 같은 월요일 00:00 UTC
+        assert_eq!(target, ts("2026-05-18T00:00:00Z"));
+    }
+}

@@ -4,6 +4,7 @@ import {
   formatRemain,
   formatResetCountdown,
   formatTokens,
+  formatTrayLabel,
 } from "./petLogic";
 import type { PlanLimits, UsageSnapshot, ApiUsage } from "./types";
 
@@ -219,6 +220,33 @@ describe("formatRemain", () => {
 
   it("4분 30초", () => {
     expect(formatRemain(4 * 60 * 1000 + 30 * 1000)).toBe("4:30");
+  });
+});
+
+describe("formatTrayLabel", () => {
+  it("fivehour 모드는 5h % 만 반올림해 반환", () => {
+    expect(formatTrayLabel("fivehour", 0.76, 0.54)).toBe("76%");
+    expect(formatTrayLabel("fivehour", 1, 0.5)).toBe("100%");
+    expect(formatTrayLabel("fivehour", 0, 0.99)).toBe("0%");
+  });
+
+  it("both 모드는 5h % + 주간 % 같이 표시 (N% · 주 M% 형식)", () => {
+    expect(formatTrayLabel("both", 0.76, 0.54)).toBe("76% · 주 54%");
+    expect(formatTrayLabel("both", 1, 1)).toBe("100% · 주 100%");
+  });
+
+  it("0–1 범위 밖 입력은 클램프 (예: 음수, 1 초과, NaN)", () => {
+    expect(formatTrayLabel("fivehour", -0.5, 0.5)).toBe("0%");
+    expect(formatTrayLabel("fivehour", 1.5, 0.5)).toBe("100%");
+    expect(formatTrayLabel("both", NaN, 0.5)).toBe("0% · 주 50%");
+    expect(formatTrayLabel("both", 0.5, NaN)).toBe("50% · 주 0%");
+  });
+
+  it("반올림 경계 (0.5)", () => {
+    // 0.5 * 100 = 50, Math.round(50) = 50
+    expect(formatTrayLabel("fivehour", 0.5, 0)).toBe("50%");
+    // 0.005 * 100 = 0.5, Math.round(0.5) = 1 (JS는 0.5에서 짝수가 아니라 위로 올림)
+    expect(formatTrayLabel("fivehour", 0.005, 0)).toBe("1%");
   });
 });
 

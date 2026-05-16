@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Account, AccountsConfig, PlanConfig, UsageSnapshot } from "./types";
+import type { Account, AccountsConfig, PlanConfig, TrayMode, UsageSnapshot } from "./types";
 import { PLAN_PRESETS } from "./types";
 import {
   cryptoRandomId,
@@ -17,6 +17,7 @@ import {
   derive,
   formatRemain,
   formatResetCountdown,
+  formatTrayLabel,
 } from "./petLogic";
 import { maybeNotify, resetThreshold } from "./notifier";
 import "./App.css";
@@ -290,6 +291,9 @@ function PetApp() {
             })),
             activeId: active.id,
           }).catch(() => {});
+          invoke("update_tray_mode", {
+            mode: planCfg?.trayMode ?? "fivehour",
+          }).catch(() => {});
 
           const synced: PlanConfig = planCfg
             ? { ...planCfg, skin: active.skinId }
@@ -314,6 +318,9 @@ function PetApp() {
         }
         // 메뉴는 빈 계정 목록 기준으로 한 번 정리
         invoke("update_tray_accounts", { accounts: [], activeId: null }).catch(
+          () => {},
+        );
+        invoke("update_tray_mode", { mode: defaultCfg.trayMode ?? "fivehour" }).catch(
           () => {},
         );
         setConfig(defaultCfg);
@@ -352,6 +359,31 @@ function PetApp() {
       if (!accCfg.accounts.some((a) => a.id === targetId)) return;
       const next: AccountsConfig = { ...accCfg, activeAccountId: targetId };
       await switchActiveAccount(next);
+    });
+    return () => {
+      un.then((fn) => fn());
+    };
+  }, []);
+
+  // 트레이 메뉴 "표시 모드 ▸"에서 사용자가 선택한 mode를 받아 PlanConfig에 영구
+  // 저장하고 React state에도 즉시 반영. set_tray_title useEffect의 deps에
+  // config.trayMode가 들어있어 setConfig만 호출하면 라벨이 다음 tick에 다시
+  // 그려지고, Rust 트레이 메뉴의 라디오 표시는 update_tray_mode로 동기화한다.
+  useEffect(() => {
+    const un = listen<TrayMode>("tray-set-mode", async (e) => {
+      const mode = e.payload;
+      const cur = await loadPlanConfig();
+      const next: PlanConfig = cur
+        ? { ...cur, trayMode: mode }
+        : {
+            plan: "max5x",
+            limits: PLAN_PRESETS.max5x,
+            skin: DEFAULT_SKIN_ID,
+            trayMode: mode,
+          };
+      await savePlanConfig(next);
+      setConfig(next);
+      invoke("update_tray_mode", { mode }).catch(() => {});
     });
     return () => {
       un.then((fn) => fn());
@@ -740,13 +772,16 @@ function Pet({
   }, [d.petState]);
 
   // Tray title. 4단계 PNG 트레이 아이콘(대나무 → 죽순 → 시든 잎)이 상태를
-  // 전부 표현하므로, 텍스트 라벨은 % 만 남겨 중복을 제거한다.
+  // 전부 표현하므로, 텍스트 라벨은 사용자가 메뉴 "표시 모드 ▸"에서 고른 형식대로
+  // 송신한다. legacy store에 trayMode가 없으면 "fivehour" (v1.24까지의 동작).
   useEffect(() => {
-    const remaining = d.petState === "disconnected" ? 0 : d.fiveHourRemaining;
-    const title = `${Math.round(remaining * 100)}%`;
+    const five = d.petState === "disconnected" ? 0 : d.fiveHourRemaining;
+    const weekly = d.petState === "disconnected" ? 0 : d.weeklyRemaining;
+    const mode: TrayMode = config.trayMode ?? "fivehour";
+    const title = formatTrayLabel(mode, five, weekly);
     invoke("set_tray_title", { title }).catch(() => {});
-    invoke("set_tray_icon_for_remaining", { remaining }).catch(() => {});
-  }, [d.fiveHourRemaining, d.petState]);
+    invoke("set_tray_icon_for_remaining", { remaining: five }).catch(() => {});
+  }, [d.fiveHourRemaining, d.weeklyRemaining, d.petState, config.trayMode]);
 
   // Threshold notifications (battery-style: low remaining triggers alert).
   // disconnected는 "데이터 없음" 의미라 마지막 값 기반 알림 발사를 차단.
