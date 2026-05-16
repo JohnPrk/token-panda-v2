@@ -9,6 +9,12 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# tauri-action 이 Releases API 로 draft release 생성 + 산출물 업로드를 하려면
+# contents:write 필요. 기본 GITHUB_TOKEN 은 read-only 인 저장소가 많아 v1.47/v1.49
+# 빌드가 "Resource not accessible by integration" 으로 실패한 원인.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
