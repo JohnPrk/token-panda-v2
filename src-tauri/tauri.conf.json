@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "토큰 판다",
-  "version": "1.26.0",
+  "version": "1.47.0",
   "identifier": "com.tnew.clauddeskpet",
   "build": {
     "frontendDist": "../dist",
@@ -37,7 +37,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app"],
+    "targets": ["dmg", "app", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -47,6 +47,12 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "Korean"]
+      }
     }
   }
 }

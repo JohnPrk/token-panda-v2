@@ -1,8 +1,10 @@
 mod claude_api;
+mod login_capture;
 mod updater;
 mod usage;
 
 use claude_api::ApiUsage;
+use login_capture::{build_cookie_header, extract_org_id_from_orgs_json, has_required_cookies};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
@@ -429,61 +431,16 @@ fn set_tray_title(app: AppHandle, title: String) -> Result<(), String> {
     Ok(())
 }
 
-// Tray icon assets keyed by (skin, 4-tier 잔여%). 지금은 판다 1종만 등록돼
-// 있고, 다른 캐릭터를 추가할 때 같은 위치에 `tray-<skin>-{100,75,50,25}.png`
-// 4개를 넣고 `tray_icon_bytes`의 match에 분기를 더하면 트레이 메뉴 전환만으로
-// 아이콘이 갈아끼워진다.
-const TRAY_ICON_PANDA_100: &[u8] = include_bytes!("../icons/tray/tray-100.png");
-const TRAY_ICON_PANDA_75: &[u8] = include_bytes!("../icons/tray/tray-75.png");
-const TRAY_ICON_PANDA_50: &[u8] = include_bytes!("../icons/tray/tray-50.png");
-const TRAY_ICON_PANDA_25: &[u8] = include_bytes!("../icons/tray/tray-25.png");
-
-fn tray_icon_bytes(skin_id: &str, remaining: f64) -> &'static [u8] {
-    let panda_tier = |r: f64| -> &'static [u8] {
-        if r >= 0.75 {
-            TRAY_ICON_PANDA_100
-        } else if r >= 0.50 {
-            TRAY_ICON_PANDA_75
-        } else if r >= 0.25 {
-            TRAY_ICON_PANDA_50
-        } else {
-            TRAY_ICON_PANDA_25
-        }
-    };
-    match skin_id {
-        "panda" => panda_tier(remaining),
-        // 알 수 없는 skin은 판다 fallback. 새 캐릭터는 여기에 분기 추가.
-        _ => panda_tier(remaining),
-    }
-}
-
-// 활성 계정의 skin id. set_active_skin에서 갱신되고
-// set_tray_icon_for_remaining에서 읽어 4-tier PNG 분기에 사용.
-fn active_skin_state() -> &'static Mutex<String> {
-    static CELL: OnceLock<Mutex<String>> = OnceLock::new();
-    CELL.get_or_init(|| Mutex::new("panda".to_string()))
-}
-
 #[tauri::command]
-fn set_active_skin(skin_id: String) -> Result<(), String> {
-    let trimmed = skin_id.trim();
-    if !trimmed.is_empty() {
-        *active_skin_state().lock() = trimmed.to_string();
-    }
+fn set_active_skin(_skin_id: String) -> Result<(), String> {
+    // 트레이 아이콘이 제거되면서 skin별 트레이 PNG 분기도 사라졌다. 호출
+    // 호환성을 위해 시그니처는 보존하되 본체는 no-op.
     Ok(())
 }
 
 #[tauri::command]
-fn set_tray_icon_for_remaining(app: AppHandle, remaining: f64) -> Result<(), String> {
-    let skin = active_skin_state().lock().clone();
-    let bytes = tray_icon_bytes(&skin, remaining);
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        let img = tauri::image::Image::from_bytes(bytes).map_err(|e| e.to_string())?;
-        tray.set_icon(Some(img)).map_err(|e| e.to_string())?;
-        // set_icon does NOT preserve the template flag from the builder.
-        // Re-assert it on every swap so all 4 tiers render consistently.
-        let _ = tray.set_icon_as_template(false);
-    }
+fn set_tray_icon_for_remaining(_app: AppHandle, _remaining: f64) -> Result<(), String> {
+    // 트레이 아이콘 제거됨. 호출 호환성 유지를 위해 시그니처는 보존.
     Ok(())
 }
 
@@ -590,6 +547,90 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_focus();
     Ok(())
+}
+
+/// (I') paste 흐름의 1단계: 시스템 기본 브라우저로 claude.ai/settings/usage 를
+/// 띄운다. 사용자가 거기서 Network 탭의 cookie 헤더 한 줄을 복사해 wizard로
+/// 돌아와 paste 하면 auto_extract_from_cookie 가 받아 처리한다.
+///
+/// 임베디드 WebView 방식(v1.27 initial)은 claude.ai 가 인증을 magic link로만
+/// 발송 + 그 링크가 시스템 기본 브라우저에서 열리기 때문에 본질적으로 작동
+/// 안 함이 확인돼 폐기. 시스템 브라우저 + paste 방식으로 전환.
+#[tauri::command]
+fn open_claude_usage_in_browser() -> Result<(), String> {
+    let url = "https://claude.ai/settings/usage";
+
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(url).status();
+
+    // Windows에서 URL은 `cmd /C start "" "<url>"` 형태로 띄운다. `start`는
+    // cmd 빌트인이라 PATH에 없고, 첫 따옴표 인자는 윈도우 제목 자리이므로
+    // 비워두지 않으면 URL이 제목으로 해석돼 브라우저가 안 뜨는 케이스가 있다.
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status();
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let result = std::process::Command::new("xdg-open").arg(url).status();
+
+    let status = result.map_err(|e| format!("브라우저 열기 명령 실행 실패: {}", e))?;
+    if !status.success() {
+        return Err(format!("브라우저 열기 명령이 비정상 종료: {}", status));
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize, Clone)]
+struct AutoExtractResult {
+    org_id: String,
+    cookie: String,
+}
+
+/// (I') paste 흐름의 2단계: 사용자가 paste한 raw Cookie 헤더 한 줄을 받아
+/// 5종만 추리고, 그 쿠키로 /api/organizations 를 호출해 org_id 를 추출한다.
+/// 성공 시 정리된 cookie 헤더 + org_id 를 반환해 wizard 폼에 자동 채움.
+#[tauri::command]
+fn auto_extract_from_cookie(raw_cookie: String) -> Result<AutoExtractResult, String> {
+    let pairs = login_capture::parse_raw_cookie_header(&raw_cookie);
+    if !has_required_cookies(&pairs) {
+        return Err("sessionKey 쿠키가 보이지 않아요. claude.ai의 cookie 헤더 한 줄을 통째로 붙여넣어 주세요.".into());
+    }
+    let cookie_header = build_cookie_header(&pairs);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP 클라이언트 생성 실패: {}", e))?;
+
+    let resp = client
+        .get("https://claude.ai/api/organizations")
+        .header("Cookie", &cookie_header)
+        .header("Accept", "*/*")
+        .header("Referer", "https://claude.ai/")
+        .header("anthropic-client-platform", "web_claude_ai")
+        .header("anthropic-client-version", "1.0.0")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        )
+        .send()
+        .map_err(|e| format!("/api/organizations 요청 실패: {}", e))?;
+
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("/api/organizations HTTP {}", status));
+    }
+
+    let org_id = extract_org_id_from_orgs_json(&body)
+        .ok_or_else(|| "organizations 응답에서 org_id를 추출하지 못했어요".to_string())?;
+
+    Ok(AutoExtractResult {
+        org_id,
+        cookie: cookie_header,
+    })
 }
 
 #[tauri::command]
@@ -908,24 +949,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     // update_checker가 1시간 주기로 업데이트 마커를 채워넣는다.
     let menu = build_menu(app, &[], None, None)?;
 
-    // 4-tier bamboo tray icons keyed to 5h remaining %:
-    //   100~75 → tray-panda-100 (full bamboo, 4 stalks)
-    //    74~50 → tray-panda-75  (3 stalks)
-    //    49~25 → tray-panda-50  (2 stalks)
-    //    24~0  → tray-panda-25  (1 stalk)
-    // Initial render uses the 100% tier; set_tray_icon_for_remaining()
-    // swaps the icon as the polling loop pushes new percentages, with
-    // the active skin id from set_active_skin selecting the asset family.
-    let tray_icon = tauri::image::Image::from_bytes(TRAY_ICON_PANDA_100)
-        .expect("tray-panda-100 must be a valid PNG");
-    // The user-supplied bamboo PNGs are full-color (green stalks + leaves),
-    // so we render them as-is. icon_as_template(true) would force macOS to
-    // re-tint only black pixels and discard the color, which broke live
-    // swaps in v0.8: the reskin call ran but the rendered icon stayed on
-    // tier-1 because the new colored bytes had no black pixels to tint.
+    // 트레이 아이콘은 사용자 요청으로 제거. 메뉴바엔 텍스트 라벨(set_tray_title)만
+    // 표시된다. 아이콘 PNG 상수와 tray_icon_bytes 분기, set_tray_icon_for_remaining
+    // 호출은 호환성을 위해 남겨두되 본체는 no-op.
     let _tray = TrayIconBuilder::with_id("main-tray")
-        .icon(tray_icon)
-        .icon_as_template(false)
         .title("…")
         .menu(&menu)
         .on_menu_event(|app, event| {
@@ -985,6 +1012,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 // 사용자가 "🆕 새 버전 설치"를 눌렀을 때 별도 스레드에서 수행되는 본체.
 // dmg 다운로드 → bash 스크립트 spawn → self-quit. 중간 실패는 알림으로만
 // 알리고 install_in_progress 락을 풀어 사용자가 다시 시도할 수 있게 한다.
+// Windows/Linux 자동 업데이트는 Phase 3에서 cross-platform화 예정 — 현재는 stub.
+#[cfg(not(target_os = "macos"))]
+fn run_install_update(_app: AppHandle) {
+    install_in_progress().store(false, Ordering::SeqCst);
+}
+
+#[cfg(target_os = "macos")]
 fn run_install_update(app: AppHandle) {
     let info = match update_info_lock().lock().clone() {
         Some(i) => i,
@@ -1018,6 +1052,11 @@ fn run_install_update(app: AppHandle) {
 // osascript로 macOS 시스템 알림. tauri-plugin-notification은 webview 권한 흐름이
 // 얽혀 있어 Rust 백그라운드 스레드에서 직접 부르기 번거로움. osascript는 알림
 // 권한이 macOS 시스템 설정에 종속되어 별도 권한 다이얼로그 없이 발사된다.
+// Windows는 Phase 3에서 powershell New-BurntToastNotification 같은 동등 흐름 추가 예정.
+#[cfg(not(target_os = "macos"))]
+fn notify_update(_title: &str, _body: &str) {}
+
+#[cfg(target_os = "macos")]
 fn notify_update(title: &str, body: &str) {
     let sanitized_title = title.replace('"', "'");
     let sanitized_body = body.replace('"', "'");
@@ -1033,6 +1072,11 @@ fn notify_update(title: &str, body: &str) {
 // 부팅 3초 후 + 1시간 주기로 GitHub Releases를 폴링. 새 버전이 있으면 UPDATE_INFO에
 // 넣고 트레이 메뉴를 다시 그린다. 네트워크 실패는 graceful — UPDATE_INFO 그대로 두고
 // 다음 사이클로 넘어간다.
+// Windows/Linux는 자동 설치 경로가 아직 없어 Phase 1에선 polling 자체를 끔.
+#[cfg(not(target_os = "macos"))]
+fn start_update_checker(_app: AppHandle) {}
+
+#[cfg(target_os = "macos")]
 fn start_update_checker(app: AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(3));
@@ -1176,7 +1220,9 @@ pub fn run() {
             refresh_usage,
             settings_focus,
             open_settings_window,
-            open_onboarding_window
+            open_onboarding_window,
+            open_claude_usage_in_browser,
+            auto_extract_from_cookie
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

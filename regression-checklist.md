@@ -130,6 +130,28 @@
 
 ---
 
+## 13. orgId/쿠키 자동 캡처 — paste 방식 (v1.27+)
+
+설정 wizard "자동으로 가져오기" → 시스템 Chrome으로 claude.ai/settings/usage 열림 → wizard의 paste 박스에 cookie 한 줄 붙여넣기 → orgId + 쿠키 자동 채움.
+
+**(임베디드 webview 방식은 폐기됨: claude.ai가 magic link 인증만 보내고, 그 링크는 시스템 기본 브라우저에서 열리므로 임베디드 webview에 cookie가 박힐 수 없음.)**
+
+- [ ] **온보딩 첫 진입**: 1단계 캐릭터 선택 후 2단계로 가면 ① 안내 위쪽에 보라색 "자동으로 가져오기" 버튼이 뜬다
+- [ ] **계정 폼**: 설정 → "+ 새 계정" 또는 활성 계정 편집 → 폼 하단 액션 줄에 "자동으로 가져오기" 버튼
+- [ ] **버튼 클릭 시 동작**: 시스템 기본 브라우저(Chrome)로 `claude.ai/settings/usage` 페이지가 새 탭에 열리고, wizard 안에는 **paste 박스**가 등장 (3단계 안내 + textarea)
+- [ ] **paste 박스 닫기**: 우측 상단 ✕ 버튼으로 paste 모드 취소 가능. textarea 비워지고 상태 메시지도 사라짐
+- [ ] **cookie 붙여넣기**: Chrome 페이지에서 ⌘⌥I → Network → `usage` 요청 → Headers → `cookie:` 헤더 한 줄 복사 → wizard의 textarea에 ⌘V
+- [ ] **자동 처리**: paste 즉시 `sessionKey=` 패턴 감지 → "Cookie 분석 중…" 상태 표시 → 성공 시 paste 박스 사라지고 Org ID + 세션 쿠키 필드가 자동 채워짐
+- [ ] **성공 메시지**: 상태 줄에 "자동으로 가져왔어요" (온보딩) / "자동으로 가져왔어요." (계정 폼) 표시
+- [ ] **테스트 검증**: 채워진 값으로 "연결 테스트" 누르면 `5h X% · 주간 X%` 정상 응답 (이모지 없이)
+- [ ] **5종만 추리기**: paste한 cookie에 다른 잡쿠키(`_ga`, `_pendo_*` 등) 섞여 있어도, 폼에 채워진 cookie는 `sessionKey; cf_clearance; __cf_bm; _cfuvid; routingHint` 5종만 (parse_raw_cookie_header + build_cookie_header)
+- [ ] **에러 경로 — sessionKey 없음**: 잡쿠키만 paste → "sessionKey 쿠키가 보이지 않아요" 메시지 + paste 모드 유지 (다시 시도 가능)
+- [ ] **에러 경로 — 만료된 cookie**: 만료된 cookie paste → "/api/organizations HTTP 401" 또는 비슷한 메시지 + paste 모드 유지
+- [ ] **수동 입력 fallback**: 자동 가져오기 안 써도 ①② 안내대로 직접 붙여넣기 여전히 동작 (기존 Organization ID + 세션 쿠키 필드 그대로 사용)
+- [ ] **Chrome이 기본 브라우저가 아닌 경우**: macOS 기본 브라우저가 Safari/Firefox/Arc면 그쪽에서 열림. 사용자 환경에 맞게 동작
+
+---
+
 **다운그레이드 검증 시나리오** (자동 업데이트 흐름을 처음 검증할 때):
 1. Cargo.toml + tauri.conf.json + package.json 버전을 임시로 낮은 버전(예: `1.20.0`)으로 낮춰서 `npm run tauri:build`
 2. 빌드된 dmg를 `/Applications`에 설치 후 실행 → 메뉴 열기 → 헤더에 `🆕 v1.23.0 있음` 마커 + `🆕 새 버전 v1.23.0 설치` 아이템 등장 (GitHub 최신이 v1.23이므로)

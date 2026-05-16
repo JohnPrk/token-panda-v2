@@ -468,6 +468,38 @@ function OnboardingApp() {
   const [cookie, setCookie] = useState("");
   const [testStatus, setTestStatus] = useState<string>("");
   const [step, setStep] = useState<1 | 2>(1);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteValue, setPasteValue] = useState("");
+
+  const autoCapture = async () => {
+    setTestStatus("");
+    setPasteValue("");
+    setPasteMode(true);
+    try {
+      await invoke("open_claude_usage_in_browser");
+    } catch (e) {
+      setTestStatus(`브라우저 열기 실패: ${String(e)}`);
+    }
+  };
+
+  const handlePasteValue = async (raw: string) => {
+    setPasteValue(raw);
+    if (!raw.includes("sessionKey=")) return;
+    setTestStatus("Cookie 분석 중…");
+    try {
+      const res = await invoke<{ org_id: string; cookie: string }>(
+        "auto_extract_from_cookie",
+        { rawCookie: raw },
+      );
+      setOrgId(res.org_id);
+      setCookie(res.cookie);
+      setPasteMode(false);
+      setPasteValue("");
+      setTestStatus("자동으로 가져왔어요. 저장하고 시작하면 끝!");
+    } catch (e) {
+      setTestStatus(`자동 가져오기 실패: ${String(e)}`);
+    }
+  };
 
   const test = async () => {
     if (!orgId.trim() || !cookie.trim()) {
@@ -481,10 +513,10 @@ function OnboardingApp() {
         { orgId: orgId.trim(), cookie: cookie.trim() },
       );
       setTestStatus(
-        `✓ 5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
+        `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
       );
     } catch (e: unknown) {
-      setTestStatus(`✗ ${String(e)}`);
+      setTestStatus(String(e));
     }
   };
 
@@ -586,6 +618,52 @@ function OnboardingApp() {
               연동 정보는 이 컴퓨터 안에만 저장되고, 외부 서버 어디에도
               전송하지 않아요.
             </p>
+
+            <div className="onboarding-auto">
+              {!pasteMode ? (
+                <>
+                  <button type="button" className="primary" onClick={autoCapture}>
+                    자동으로 가져오기
+                  </button>
+                  <p className="onboarding-auto-note">
+                    누르면 Chrome으로 claude.ai/settings/usage 페이지가 열려요.
+                    거기서 cookie 한 줄만 복사해서 아래 칸에 붙여넣으면 Org ID
+                    + 쿠키가 자동으로 채워집니다. 직접 입력하려면 아래 ①②를 참고.
+                  </p>
+                </>
+              ) : (
+                <div className="paste-capture">
+                  <div className="paste-capture-head">
+                    <strong>Cookie 붙여넣기</strong>
+                    <button
+                      type="button"
+                      className="paste-capture-close"
+                      onClick={() => {
+                        setPasteMode(false);
+                        setPasteValue("");
+                        setTestStatus("");
+                      }}
+                      aria-label="닫기"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <ol className="paste-capture-steps">
+                    <li>방금 열린 Chrome 탭에서 <code>⌘⌥I</code> → Network 탭</li>
+                    <li>목록의 <code>usage</code> 요청 클릭 → Headers → Request Headers의 <code>cookie:</code> 한 줄 복사</li>
+                    <li>아래 칸에 ⌘V로 붙여넣기 (자동으로 처리됩니다)</li>
+                  </ol>
+                  <textarea
+                    autoFocus
+                    placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+                    value={pasteValue}
+                    onChange={(e) => handlePasteValue(e.target.value)}
+                    rows={4}
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="onboarding-howto">
               <h3>① Org ID 가져오기</h3>
@@ -1140,12 +1218,12 @@ function Settings({
 
           {activeAccount && apiActive && (
             <p className="api-note ok">
-              ✓ <strong>{activeAccount.label}</strong>에서 실시간 사용량을
+              <strong>{activeAccount.label}</strong>에서 실시간 사용량을
               받고 있어요.
             </p>
           )}
           {activeAccount && apiError && (
-            <p className="api-note err">⚠ API 오류: {apiError}</p>
+            <p className="api-note err">API 오류: {apiError}</p>
           )}
           {!activeAccount && accounts.accounts.length === 0 && (
             <p className="api-note">
@@ -1303,6 +1381,38 @@ function AccountForm({
   const [orgId, setOrgId] = useState(existing?.orgId ?? "");
   const [cookie, setCookie] = useState(existing?.cookie ?? "");
   const [testStatus, setTestStatus] = useState<string>("");
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteValue, setPasteValue] = useState("");
+
+  const autoCapture = async () => {
+    setTestStatus("");
+    setPasteValue("");
+    setPasteMode(true);
+    try {
+      await invoke("open_claude_usage_in_browser");
+    } catch (e) {
+      setTestStatus(`브라우저 열기 실패: ${String(e)}`);
+    }
+  };
+
+  const handlePasteValue = async (raw: string) => {
+    setPasteValue(raw);
+    if (!raw.includes("sessionKey=")) return;
+    setTestStatus("Cookie 분석 중…");
+    try {
+      const res = await invoke<{ org_id: string; cookie: string }>(
+        "auto_extract_from_cookie",
+        { rawCookie: raw },
+      );
+      setOrgId(res.org_id);
+      setCookie(res.cookie);
+      setPasteMode(false);
+      setPasteValue("");
+      setTestStatus("자동으로 가져왔어요.");
+    } catch (e) {
+      setTestStatus(`자동 가져오기 실패: ${String(e)}`);
+    }
+  };
 
   const test = async () => {
     if (!orgId.trim() || !cookie.trim()) {
@@ -1316,10 +1426,10 @@ function AccountForm({
         { orgId: orgId.trim(), cookie: cookie.trim() },
       );
       setTestStatus(
-        `✓ 5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
+        `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
       );
     } catch (e: unknown) {
-      setTestStatus(`✗ ${String(e)}`);
+      setTestStatus(String(e));
     }
   };
 
@@ -1370,6 +1480,38 @@ function AccountForm({
           ))}
         </div>
       </div>
+      {pasteMode && (
+        <div className="paste-capture">
+          <div className="paste-capture-head">
+            <strong>Cookie 붙여넣기</strong>
+            <button
+              type="button"
+              className="paste-capture-close"
+              onClick={() => {
+                setPasteMode(false);
+                setPasteValue("");
+                setTestStatus("");
+              }}
+              aria-label="닫기"
+            >
+              ✕
+            </button>
+          </div>
+          <ol className="paste-capture-steps">
+            <li>Chrome 탭에서 <code>⌘⌥I</code> → Network 탭</li>
+            <li><code>usage</code> 요청 → Headers → <code>cookie:</code> 한 줄 복사</li>
+            <li>아래 칸에 ⌘V로 붙여넣기 (자동 처리)</li>
+          </ol>
+          <textarea
+            autoFocus
+            placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+            value={pasteValue}
+            onChange={(e) => handlePasteValue(e.target.value)}
+            rows={3}
+            spellCheck={false}
+          />
+        </div>
+      )}
       <label>
         Organization ID
         <input
@@ -1391,6 +1533,9 @@ function AccountForm({
         />
       </label>
       <div className="api-actions">
+        <button type="button" onClick={autoCapture}>
+          자동으로 가져오기
+        </button>
         <button type="button" onClick={test}>
           테스트
         </button>
