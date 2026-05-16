@@ -1,4 +1,5 @@
 mod claude_api;
+mod updater;
 mod usage;
 
 use claude_api::ApiUsage;
@@ -706,22 +707,78 @@ fn start_watcher(app: AppHandle) -> Arc<WatcherState> {
     state
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct AccountMeta {
     id: String,
     label: String,
 }
 
-// 트레이 메뉴를 항상 같은 골격으로 짠다: 버전(비활성) / 보이기 / 새로고침 /
-// (계정이 1개 이상이면) 계정 전환 ▸ … / 설정 / 종료. accounts가 비어 있으면
-// 서브메뉴를 끼우지 않아 사용자에게 빈 카테고리가 보이지 않게 한다.
+// 백그라운드 update_checker 스레드가 1시간 주기로 채우는 글로벌. 트레이 메뉴
+// 빌더(build_menu)가 이걸 읽어 헤더 라벨에 인라인 마커 + "🆕 설치" 메뉴 아이템을
+// conditional하게 끼운다. UPDATE_INFO와 TRAY_ACCOUNTS_CACHE는 둘 다 rebuild_tray_menu가
+// 양쪽을 읽어 합치므로, 어느 한쪽이 새로 들어와도 트레이 메뉴 한 번만 다시 그리면 된다.
+static UPDATE_INFO: OnceLock<parking_lot::Mutex<Option<updater::UpdateInfo>>> = OnceLock::new();
+static TRAY_ACCOUNTS_CACHE: OnceLock<parking_lot::Mutex<(Vec<AccountMeta>, Option<String>)>> =
+    OnceLock::new();
+// 설치 클릭이 진행 중일 때 중복 트리거 차단. 사용자가 메뉴를 다시 펴서 "설치"를
+// 여러 번 누르는 케이스 보호.
+static INSTALL_IN_PROGRESS: OnceLock<AtomicBool> = OnceLock::new();
+
+fn update_info_lock() -> &'static parking_lot::Mutex<Option<updater::UpdateInfo>> {
+    UPDATE_INFO.get_or_init(|| parking_lot::Mutex::new(None))
+}
+
+fn tray_accounts_cache_lock(
+) -> &'static parking_lot::Mutex<(Vec<AccountMeta>, Option<String>)> {
+    TRAY_ACCOUNTS_CACHE.get_or_init(|| parking_lot::Mutex::new((Vec::new(), None)))
+}
+
+fn install_in_progress() -> &'static AtomicBool {
+    INSTALL_IN_PROGRESS.get_or_init(|| AtomicBool::new(false))
+}
+
+fn rebuild_tray_menu(app: &AppHandle) -> Result<(), String> {
+    let (accounts, active_id) = {
+        let lock = tray_accounts_cache_lock().lock();
+        lock.clone()
+    };
+    let info_opt = update_info_lock().lock().clone();
+    let menu = build_menu(app, &accounts, active_id.as_deref(), info_opt.as_ref())
+        .map_err(|e| e.to_string())?;
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// 트레이 메뉴를 항상 같은 골격으로 짠다: 버전(비활성, 업데이트 있으면 인라인 마커
+// 추가) / 🆕 새 버전 설치(업데이트 있을 때만) / 보이기 / 새로고침 /
+// (계정 1개 이상이면) 계정 전환 ▸ / 설정 / 종료.
 fn build_menu(
     app: &AppHandle,
     accounts: &[AccountMeta],
     active_id: Option<&str>,
+    update_info: Option<&updater::UpdateInfo>,
 ) -> tauri::Result<Menu<Wry>> {
-    let version_label = format!("토큰 판다 v{}", env!("CARGO_PKG_VERSION"));
+    let version_label = match update_info {
+        Some(info) => format!(
+            "토큰 판다 v{} · 🆕 v{} 있음",
+            env!("CARGO_PKG_VERSION"),
+            info.latest_version
+        ),
+        None => format!("토큰 판다 v{}", env!("CARGO_PKG_VERSION")),
+    };
     let version_item = MenuItem::with_id(app, "version", &version_label, false, None::<&str>)?;
+    let update_item: Option<MenuItem<Wry>> = match update_info {
+        Some(info) => Some(MenuItem::with_id(
+            app,
+            "install_update",
+            &format!("🆕 새 버전 v{} 설치", info.latest_version),
+            true,
+            None::<&str>,
+        )?),
+        None => None,
+    };
     let show_item = MenuItem::with_id(app, "show", "펫 보이기/숨기기", true, None::<&str>)?;
     let refresh_item = MenuItem::with_id(app, "refresh", "지금 새로고침", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "설정...", true, None::<&str>)?;
@@ -760,6 +817,9 @@ fn build_menu(
 
     let mut top_refs: Vec<&dyn IsMenuItem<Wry>> = Vec::new();
     top_refs.push(&version_item);
+    if let Some(ref item) = update_item {
+        top_refs.push(item);
+    }
     top_refs.push(&show_item);
     top_refs.push(&refresh_item);
     if let Some(ref sub) = submenu_opt {
@@ -777,17 +837,18 @@ fn update_tray_accounts(
     accounts: Vec<AccountMeta>,
     active_id: Option<String>,
 ) -> Result<(), String> {
-    let menu = build_menu(&app, &accounts, active_id.as_deref()).map_err(|e| e.to_string())?;
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    {
+        let mut lock = tray_accounts_cache_lock().lock();
+        *lock = (accounts, active_id);
     }
-    Ok(())
+    rebuild_tray_menu(&app)
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    // 첫 부팅에는 계정 정보를 모르니 빈 메뉴로 짓고, 메인 webview가 부트할 때
-    // update_tray_accounts로 계정 서브메뉴를 채워넣는다.
-    let menu = build_menu(app, &[], None)?;
+    // 첫 부팅에는 계정 정보와 업데이트 정보를 모르니 둘 다 None으로 메뉴를 짓고,
+    // 메인 webview가 부트할 때 update_tray_accounts로 계정 서브메뉴를, 백그라운드
+    // update_checker가 1시간 주기로 업데이트 마커를 채워넣는다.
+    let menu = build_menu(app, &[], None, None)?;
 
     // 4-tier bamboo tray icons keyed to 5h remaining %:
     //   100~75 → tray-panda-100 (full bamboo, 4 stalks)
@@ -835,6 +896,16 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 "settings" => {
                     let _ = open_settings_window(app.clone());
                 }
+                "install_update" => {
+                    // 사용자가 메뉴를 여러 번 펴서 "설치"를 연타하는 케이스 방어.
+                    if install_in_progress().swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+                    let app_clone = app.clone();
+                    std::thread::spawn(move || {
+                        run_install_update(app_clone);
+                    });
+                }
                 "quit" => app.exit(0),
                 _ => {}
             }
@@ -847,9 +918,98 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+// 사용자가 "🆕 새 버전 설치"를 눌렀을 때 별도 스레드에서 수행되는 본체.
+// dmg 다운로드 → bash 스크립트 spawn → self-quit. 중간 실패는 알림으로만
+// 알리고 install_in_progress 락을 풀어 사용자가 다시 시도할 수 있게 한다.
+fn run_install_update(app: AppHandle) {
+    let info = match update_info_lock().lock().clone() {
+        Some(i) => i,
+        None => {
+            install_in_progress().store(false, Ordering::SeqCst);
+            return;
+        }
+    };
+    notify_update("토큰 판다 업데이트", "새 버전 다운로드 중...");
+    let dmg_path = match updater::download_dmg(&info.dmg_url, &info.dmg_name) {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("dmg download failed: {}", e);
+            notify_update("업데이트 실패", &format!("다운로드 실패: {}", e));
+            install_in_progress().store(false, Ordering::SeqCst);
+            return;
+        }
+    };
+    let app_path = updater::applications_app_path();
+    if let Err(e) = updater::spawn_install_script(&dmg_path, &app_path) {
+        log::error!("spawn install script failed: {}", e);
+        notify_update("업데이트 실패", &format!("스크립트 실행 실패: {}", e));
+        install_in_progress().store(false, Ordering::SeqCst);
+        return;
+    }
+    // 스크립트가 sleep 1s 후 옛 앱이 죽었는지 검사하므로, 우리는 0.5s 후 self-quit.
+    std::thread::sleep(Duration::from_millis(500));
+    app.exit(0);
+}
+
+// osascript로 macOS 시스템 알림. tauri-plugin-notification은 webview 권한 흐름이
+// 얽혀 있어 Rust 백그라운드 스레드에서 직접 부르기 번거로움. osascript는 알림
+// 권한이 macOS 시스템 설정에 종속되어 별도 권한 다이얼로그 없이 발사된다.
+fn notify_update(title: &str, body: &str) {
+    let sanitized_title = title.replace('"', "'");
+    let sanitized_body = body.replace('"', "'");
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(format!(
+            r#"display notification "{}" with title "{}""#,
+            sanitized_body, sanitized_title
+        ))
+        .status();
+}
+
+// 부팅 3초 후 + 1시간 주기로 GitHub Releases를 폴링. 새 버전이 있으면 UPDATE_INFO에
+// 넣고 트레이 메뉴를 다시 그린다. 네트워크 실패는 graceful — UPDATE_INFO 그대로 두고
+// 다음 사이클로 넘어간다.
+fn start_update_checker(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        loop {
+            let current = env!("CARGO_PKG_VERSION");
+            let fetched = updater::fetch_latest_release(current);
+            let changed = {
+                let mut lock = update_info_lock().lock();
+                let prev = lock.clone();
+                if prev != fetched {
+                    *lock = fetched.clone();
+                    true
+                } else {
+                    false
+                }
+            };
+            if changed {
+                let app_for_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    let _ = rebuild_tray_menu(&app_for_main);
+                });
+            }
+            // 1시간 대기. anonymous GitHub API 60/hr이라 1회/hr면 안전.
+            std::thread::sleep(Duration::from_secs(60 * 60));
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 두 번째 부팅 시도는 즉시 quit. lock file이 같은 bundle id로 잡혀 있어
+        // LSDB가 같은 .app을 두 번 spawn하거나, 사용자가 binary를 손으로 한 번 더
+        // 띄워도 트레이가 2개 뜨지 않는다. 콜백은 *기존* 인스턴스에서 실행되며,
+        // 메인 윈도우를 다시 보이게 끌어올린다.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -866,6 +1026,7 @@ pub fn run() {
 
             let handle = app.handle().clone();
             build_tray(&handle)?;
+            start_update_checker(handle.clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]

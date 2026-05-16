@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { derive } from "./petLogic";
+import {
+  derive,
+  formatRemain,
+  formatResetCountdown,
+  formatTokens,
+} from "./petLogic";
 import type { PlanLimits, UsageSnapshot, ApiUsage } from "./types";
 
 const limits: PlanLimits = { fiveHour: 1_000_000, weekly: 7_000_000 };
@@ -104,5 +109,138 @@ describe("derive", () => {
       NOW_MS,
     );
     expect(d.petState).toBe("disconnected");
+  });
+
+  // === 경계 케이스 — 각 티어 진입 직후 1개씩 ===
+  // 임계: full ≤90 ≤high ≤77 ≤good ≤63 ≤mid ≤49 ≤low ≤33 ≤tired ≤15 ≤sleepy
+  it("5h 5% 사용 (remaining 95%) → full", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 5 }) }), limits, NOW_MS);
+    expect(d.petState).toBe("full");
+  });
+
+  it("5h 15% 사용 (remaining 85%) → high", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 15 }) }), limits, NOW_MS);
+    expect(d.petState).toBe("high");
+  });
+
+  it("5h 30% 사용 (remaining 70%) → good", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 30 }) }), limits, NOW_MS);
+    expect(d.petState).toBe("good");
+  });
+
+  it("5h 60% 사용 (remaining 40%) → low", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 60 }) }), limits, NOW_MS);
+    expect(d.petState).toBe("low");
+  });
+
+  it("5h 75% 사용 (remaining 25%) → tired", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 75 }) }), limits, NOW_MS);
+    expect(d.petState).toBe("tired");
+  });
+
+  // === 캐시 카운트다운 ===
+  it("last_request_at 1분 전이면 cacheRemainMs ≈ 4분, nudge=false", () => {
+    const lastReq = new Date(NOW_MS - 60 * 1000).toISOString();
+    const d = derive(
+      snap({ last_request_at: lastReq, api: api({ five_hour_pct: 10 }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.cacheRemainMs).toBe(4 * 60 * 1000);
+    expect(d.cacheNudge).toBe(false);
+  });
+
+  it("last_request_at 4분 30초 전이면 nudge=true (4분 경계 지남)", () => {
+    const lastReq = new Date(NOW_MS - 4.5 * 60 * 1000).toISOString();
+    const d = derive(
+      snap({ last_request_at: lastReq, api: api({ five_hour_pct: 10 }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.cacheNudge).toBe(true);
+    expect(d.cacheRemainMs).toBeGreaterThan(0);
+  });
+
+  it("last_request_at 5분 초과면 cache 정보 null (TTL 만료)", () => {
+    const lastReq = new Date(NOW_MS - 6 * 60 * 1000).toISOString();
+    const d = derive(
+      snap({ last_request_at: lastReq, api: api({ five_hour_pct: 10 }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.cacheRemainMs).toBeNull();
+    expect(d.cacheNudge).toBe(false);
+  });
+
+  // === 리셋 카운트다운 ===
+  it("API 리셋 시각이 신선하면 그 값으로 ms 환산", () => {
+    const resetAt = new Date(NOW_MS + 30 * 60 * 1000).toISOString();
+    const d = derive(
+      snap({ api: api({ five_hour_pct: 10, five_hour_resets_at: resetAt }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.fiveHourResetMs).toBe(30 * 60 * 1000);
+  });
+
+  it("리셋 시각 없으면 null", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 10 }) }), limits, NOW_MS);
+    expect(d.fiveHourResetMs).toBeNull();
+    expect(d.weeklyResetMs).toBeNull();
+  });
+});
+
+describe("formatTokens", () => {
+  it("1000 미만은 그대로 정수 문자열", () => {
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(999)).toBe("999");
+  });
+
+  it("1k 이상은 소수 1자리 k 표기", () => {
+    expect(formatTokens(1_000)).toBe("1.0k");
+    expect(formatTokens(12_345)).toBe("12.3k");
+  });
+
+  it("1M 이상은 소수 2자리 M 표기", () => {
+    expect(formatTokens(1_000_000)).toBe("1.00M");
+    expect(formatTokens(7_250_000)).toBe("7.25M");
+  });
+});
+
+describe("formatRemain", () => {
+  it("음수는 0:00으로 클램프", () => {
+    expect(formatRemain(-5000)).toBe("0:00");
+  });
+
+  it("초 단위 0 패딩", () => {
+    expect(formatRemain(5 * 1000)).toBe("0:05");
+    expect(formatRemain(65 * 1000)).toBe("1:05");
+  });
+
+  it("4분 30초", () => {
+    expect(formatRemain(4 * 60 * 1000 + 30 * 1000)).toBe("4:30");
+  });
+});
+
+describe("formatResetCountdown", () => {
+  it("0 이하는 곧 초기화", () => {
+    expect(formatResetCountdown(0)).toBe("곧 초기화");
+    expect(formatResetCountdown(-1)).toBe("곧 초기화");
+  });
+
+  it("1시간 미만은 분 단위", () => {
+    expect(formatResetCountdown(45 * 60 * 1000)).toBe("45분 후");
+  });
+
+  it("1시간 이상 24시간 미만은 시간+분", () => {
+    expect(formatResetCountdown(3 * 60 * 60 * 1000 + 15 * 60 * 1000)).toBe(
+      "3시간 15분 후",
+    );
+  });
+
+  it("1일 이상은 일+시간", () => {
+    expect(formatResetCountdown(2 * 24 * 60 * 60 * 1000 + 5 * 60 * 60 * 1000)).toBe(
+      "2일 5시간 후",
+    );
   });
 });

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.23.0"
+version = "1.24.0"
 description = "Claude Desk Pet"
 authors = ["you"]
 license = ""
@@ -23,6 +23,7 @@ tauri = { version = "2.10.3", features = ["macos-private-api", "tray-icon", "ima
 tauri-plugin-log = "2"
 tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 notify = "6"
 notify-debouncer-mini = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
