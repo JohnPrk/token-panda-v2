@@ -13,9 +13,12 @@ export const PET_SCALE_MIN = 0.6;
 // 안에 들어오는 안전한 상한이 약 1.5.
 export const PET_SCALE_MAX = 1.5;
 export const PET_SCALE_DEFAULT = 1.0;
-// 드래그 dx + dy 합이 이 픽셀만큼 늘어나면 scale 이 1.0 만큼 증가. 100px ≈ 0.5
-// 배율 변화라 한쪽 끝에서 끝까지 가는 데 ~250px 정도 필요. 손맛 무난.
-export const PET_SCALE_DRAG_PX_PER_UNIT = 200;
+// 드래그 dx + dy 합이 이 픽셀만큼 늘어나면 scale 이 1.0 만큼 증가. 200/400 두 차례
+// 정정을 거쳐 600 에 안착(사용자 2026-05-18 두 차례 정정). 0.6~1.5 폭 0.9 를
+// 가로지르려면 ~540px 드래그 필요 → 손목 한 번에 끝까지 못 가고 의도된 위치에
+// 멈추기 쉬움. inner 이동량(inner.w * Δscale) 도 마우스 이동량의 절반 이하라
+// 핸들이 손가락 뒤에 잔잔히 따라오는 형태(도망감 X).
+export const PET_SCALE_DRAG_PX_PER_UNIT = 600;
 
 export function clampScale(v: number): number {
   if (!Number.isFinite(v)) return PET_SCALE_DEFAULT;

@@ -725,10 +725,11 @@ describe("scaleFromDrag (v1.70 펫 zoom)", () => {
     expect(smaller).toBeLessThan(1.0);
   });
 
-  it("200px delta = 1.0 단위 변화 (PX_PER_UNIT 상수에 맞춤)", () => {
-    expect(scaleFromDrag(1.0, 200)).toBe(2.0 > PET_SCALE_MAX ? PET_SCALE_MAX : 2.0);
-    // startScale=1.0 + 200/200 = 2.0 → MAX(1.8) 로 clamp.
-    expect(scaleFromDrag(1.0, 200)).toBe(PET_SCALE_MAX);
+  it("200px delta = PX_PER_UNIT 비례 단위 변화", () => {
+    // v1.70 (PX_PER_UNIT 200): 200px = 1.0 단위 변화 → 2.0 → MAX(1.5) clamp.
+    // v1.71 (PX_PER_UNIT 600 둔감화): 200px = 0.333 단위 변화 → 1.333 (clamp 영향 X).
+    // 의도는 "PX_PER_UNIT 상수에 비례" 검증으로 일관.
+    expect(scaleFromDrag(1.0, 200)).toBeCloseTo(1.0 + 200 / 600, 6);
   });
 
   it("결과는 항상 clampScale 적용 (max 초과 / min 미만)", () => {
@@ -738,5 +739,18 @@ describe("scaleFromDrag (v1.70 펫 zoom)", () => {
 
   it("NaN delta 가 흘러들면 fallback (Number.isFinite 가드)", () => {
     expect(scaleFromDrag(1.0, NaN)).toBe(PET_SCALE_DEFAULT);
+  });
+
+  // v1.71 PX_PER_UNIT 200→600 둔감화 후 새 단위 검증. 기존 200px 케이스는
+  // expect 가 PET_SCALE_MAX 상수라 그대로 통과 (1.0 + 200/600 = 1.333 < MAX 1.5,
+  // 1000은 여전히 MAX clamp). 폭 0.9 / PX_PER_UNIT 600 → 전체 범위 가로지르는
+  // 데 540px 드래그 필요.
+  it("300px delta = 0.5 단위 변화 (v1.71 PX_PER_UNIT 둔감화 기준)", () => {
+    expect(scaleFromDrag(0.6, 300)).toBeCloseTo(1.1, 6);
+  });
+
+  it("150px delta = 0.25 단위 변화 (선형, v1.71 기준)", () => {
+    expect(scaleFromDrag(1.0, 150)).toBeCloseTo(1.25, 6);
+    expect(scaleFromDrag(1.0, -150)).toBeCloseTo(0.75, 6);
   });
 });
