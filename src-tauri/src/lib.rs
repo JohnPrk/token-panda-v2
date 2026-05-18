@@ -1101,7 +1101,7 @@ fn build_menu(
         None => None,
     };
     let show_item = MenuItem::with_id(app, "show", "펫 보이기/숨기기", true, None::<&str>)?;
-    let refresh_item = MenuItem::with_id(app, "refresh", "지금 새로고침", true, None::<&str>)?;
+    let refresh_item = MenuItem::with_id(app, "refresh", "지금 새로고침 ↻", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "설정...", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
 
