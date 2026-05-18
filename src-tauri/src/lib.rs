@@ -1154,6 +1154,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 "refresh" => {
                     let _ = refresh_usage(app.clone());
+                    // usage 새로고침과 함께 GitHub Releases도 한 번 더 폴링.
+                    // 1시간 cycle 사이에 새 버전이 올라와도 사용자가 트레이
+                    // 새로고침을 누르면 바로 마커가 뜬다.
+                    spawn_update_check_now(app.clone());
                 }
                 "settings" => {
                     let _ = open_settings_window(app.clone());
@@ -1249,6 +1253,45 @@ fn notify_update(title: &str, body: &str) {
         .status();
 }
 
+// GitHub Releases 한 번 조회 → UPDATE_INFO 갱신 → 변동 있을 때만 트레이 메뉴
+// 다시 그리기. fetch_latest_release가 blocking이라 호출자가 thread context를
+// 책임진다 (start_update_checker는 이미 자기 스레드, spawn_update_check_now는
+// 매번 새 스레드).
+#[cfg(target_os = "macos")]
+fn check_latest_release_and_rebuild(app: &AppHandle) {
+    let current = env!("CARGO_PKG_VERSION");
+    let fetched = updater::fetch_latest_release(current);
+    let changed = {
+        let mut lock = update_info_lock().lock();
+        let prev = lock.clone();
+        if prev != fetched {
+            *lock = fetched.clone();
+            true
+        } else {
+            false
+        }
+    };
+    if changed {
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let _ = rebuild_tray_menu(&app_for_main);
+        });
+    }
+}
+
+// "지금 새로고침" 트레이 클릭 시 호출. 1시간 폴링 cycle을 기다리지 않고 즉시
+// GitHub Releases를 한 번 더 찌른다. blocking HTTP라 별도 스레드로 분리해서
+// 트레이 메뉴 응답성 유지.
+#[cfg(target_os = "macos")]
+fn spawn_update_check_now(app: AppHandle) {
+    std::thread::spawn(move || {
+        check_latest_release_and_rebuild(&app);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_update_check_now(_app: AppHandle) {}
+
 // 부팅 3초 후 + 1시간 주기로 GitHub Releases를 폴링. 새 버전이 있으면 UPDATE_INFO에
 // 넣고 트레이 메뉴를 다시 그린다. 네트워크 실패는 graceful — UPDATE_INFO 그대로 두고
 // 다음 사이클로 넘어간다.
@@ -1261,24 +1304,7 @@ fn start_update_checker(app: AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(3));
         loop {
-            let current = env!("CARGO_PKG_VERSION");
-            let fetched = updater::fetch_latest_release(current);
-            let changed = {
-                let mut lock = update_info_lock().lock();
-                let prev = lock.clone();
-                if prev != fetched {
-                    *lock = fetched.clone();
-                    true
-                } else {
-                    false
-                }
-            };
-            if changed {
-                let app_for_main = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    let _ = rebuild_tray_menu(&app_for_main);
-                });
-            }
+            check_latest_release_and_rebuild(&app);
             // 1시간 대기. anonymous GitHub API 60/hr이라 1회/hr면 안전.
             std::thread::sleep(Duration::from_secs(60 * 60));
         }
