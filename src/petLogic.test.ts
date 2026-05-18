@@ -261,9 +261,17 @@ describe("formatTrayLabel", () => {
     expect(formatTrayLabel("all", 1, 1, 0.5)).toBe("100% · 주 100% · $0.50");
   });
 
-  it("all 모드인데 prepaid가 null/NaN이면 both 동작으로 폴백 (라벨 깜빡임 방지)", () => {
-    expect(formatTrayLabel("all", 0.76, 0.54, null)).toBe("76% · 주 54%");
-    expect(formatTrayLabel("all", 0.76, 0.54, NaN)).toBe("76% · 주 54%");
+  it("all 모드 + prepaid 값 0 → $0.00 명시 표시 (사용자가 0이라도 자리는 보고 싶다고 명시)", () => {
+    expect(formatTrayLabel("all", 0.76, 0.54, 0)).toBe("76% · 주 54% · $0.00");
+  });
+
+  it("all 모드인데 prepaid가 null/NaN이면 $— placeholder (자리는 유지, 값만 모름 표시)", () => {
+    expect(formatTrayLabel("all", 0.76, 0.54, null)).toBe(
+      "76% · 주 54% · $—",
+    );
+    expect(formatTrayLabel("all", 0.76, 0.54, NaN)).toBe(
+      "76% · 주 54% · $—",
+    );
   });
 
   it("all 모드는 prepaid를 항상 둘째 자리까지 toFixed", () => {

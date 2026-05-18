@@ -67,12 +67,26 @@ export type ApiConfig = {
 // 활성 계정의 자격증명만 폴링하고, 활성 계정의 skin이 메인 펫과 트레이
 // 아이콘에 동시에 반영된다. PlanConfig.skin은 활성 계정의 skinId를
 // 미러링하는 derived 값으로만 유지한다.
+//
+// platformOrgId는 *선택*. platform.claude.com의 org UUID는 claude.ai의
+// orgId와 *완전히 다른 체계*라(같은 UUID로 두 도메인을 쏘면 엉뚱한
+// 응답이 옴 — v1.50 회귀에서 학인됨), prepaid 잔액을 보려는 사용자가
+// 별도로 채워야 한다. 비워두면 prepaid 호출 자체를 건너뛰고 트레이의
+// "5h+주간+$" 모드도 자동으로 "5h+주간"으로 폴백한다.
+//
+// platformCookie도 *선택*. platform.claude.com 도메인은 claude.ai 와
+// 별도 쿠키 컨텍스트라 claude.ai 세션 쿠키를 그대로 흘려보내면 403이
+// 떨어지는 케이스가 있다(사용자 보고 2026-05-18). 비워두면 메인 cookie를
+// 그대로 시도하고, 채워두면 그걸로 prepaid 호출만 분기한다 (usage 호출은
+// 메인 cookie 유지).
 export type Account = {
   id: string;
   label: string;
   orgId: string;
   cookie: string;
   skinId: string;
+  platformOrgId?: string;
+  platformCookie?: string;
 };
 
 export type AccountsConfig = {

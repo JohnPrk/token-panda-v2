@@ -131,8 +131,10 @@ export function formatRemain(ms: number): string {
 
 // 트레이 라벨에 어떤 정보를 박을지를 사용자가 메뉴에서 선택할 수 있도록 분기.
 // "fivehour" → 현재처럼 5h 남은 % 만, "both" → 5h % + 주간 %, "all" → 둘 +
-// platform prepaid 잔액(달러)까지. all이지만 prepaid 데이터가 아직 없으면
-// both와 동일한 라벨로 떨어진다 (트레이가 갑자기 짧아져 깜빡이는 걸 막기 위함).
+// platform prepaid 잔액(달러)까지. all 모드는 사용자가 "$ 자리를 보겠다"고
+// 명시한 신호라서 prepaid가 아직 안 도착했거나(platform UUID 미설정·첫 폴링
+// 전·API 실패) 0이거나 항상 자리를 둔다. null이면 `$—` placeholder, 0이면
+// `$0.00`, 양수면 그대로. 자리 자체가 사라지면 사용자가 "왜 안 나오지" 의심하니까.
 export type TrayMode = "fivehour" | "both" | "all";
 
 export function formatTrayLabel(
@@ -145,11 +147,12 @@ export function formatTrayLabel(
   if (mode === "fivehour") return `${five}%`;
   const weekly = Math.round(clampUnit(weeklyRemaining) * 100);
   if (mode === "both") return `${five}% · 주 ${weekly}%`;
-  // mode === "all"
-  if (prepaidDollars === null || !Number.isFinite(prepaidDollars)) {
-    return `${five}% · 주 ${weekly}%`;
-  }
-  return `${five}% · 주 ${weekly}% · $${prepaidDollars.toFixed(2)}`;
+  // mode === "all" — $ 자리 무조건 유지
+  const dollarPart =
+    prepaidDollars !== null && Number.isFinite(prepaidDollars)
+      ? `$${prepaidDollars.toFixed(2)}`
+      : "$—";
+  return `${five}% · 주 ${weekly}% · ${dollarPart}`;
 }
 
 function clampUnit(v: number): number {

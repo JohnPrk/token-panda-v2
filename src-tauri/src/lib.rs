@@ -286,7 +286,17 @@ struct WatcherState {
 
 #[derive(Default)]
 struct ApiState {
-    config: Mutex<Option<(String, String)>>, // (org_id, cookie)
+    /// (claude_ai_org_id, cookie, platform_org_id?, platform_cookie?).
+    /// claude_ai_org/cookie는 usage 호출(claude.ai 도메인)용. platform_org는
+    /// prepaid 잔액 호출(platform.claude.com 도메인)용 — **두 도메인의 org
+    /// UUID는 서로 다른 체계**라(v1.50 회귀: 같은 UUID로 두 도메인 쏘면
+    /// 엉뚱한 $225가 박혔음) 별도로 받는다. platform_cookie도 *분리된 쿠키
+    /// 컨텍스트*라(사용자 보고 2026-05-18: claude.ai 쿠키 그대로 흘리면 403)
+    /// 별도로 받을 수 있게 둔다. 셋 다 비어있으면 prepaid 호출 자체를
+    /// 안 함. platform_cookie만 비어있고 platform_org만 있으면 메인
+    /// cookie를 fallback으로 쓴다(claude.ai와 platform 쿠키가 같이 동작하는
+    /// 일부 계정 대비).
+    config: Mutex<Option<(String, String, Option<String>, Option<String>)>>,
     latest: Mutex<Option<ApiUsage>>,
     last_error: Mutex<Option<String>>,
     /// platform.claude.com prepaid 잔액. usage 호출과 같은 poller cycle에서
@@ -331,26 +341,97 @@ fn get_usage_snapshot() -> CombinedSnapshot {
 }
 
 #[tauri::command]
-fn set_api_config(org_id: Option<String>, cookie: Option<String>) -> Result<(), String> {
-    let pair = match (org_id, cookie) {
+fn set_api_config(
+    org_id: Option<String>,
+    cookie: Option<String>,
+    platform_org_id: Option<String>,
+    platform_cookie: Option<String>,
+) -> Result<(), String> {
+    let quad = match (org_id, cookie) {
         (Some(o), Some(c)) if !o.trim().is_empty() && !c.trim().is_empty() => {
-            Some((o.trim().to_string(), c.trim().to_string()))
+            // 빈 문자열은 None으로 정규화 — UI에서 비워둔 채로 저장돼도
+            // prepaid 호출 분기가 흔들리지 않게.
+            let platform_org = platform_org_id
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let platform_ck = platform_cookie
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            Some((
+                o.trim().to_string(),
+                c.trim().to_string(),
+                platform_org,
+                platform_ck,
+            ))
         }
         _ => None,
     };
-    *api_state().config.lock() = pair;
+    *api_state().config.lock() = quad;
     if api_state().config.lock().is_none() {
         *api_state().latest.lock() = None;
         *api_state().last_error.lock() = None;
         *api_state().prepaid.lock() = None;
         *api_state().prepaid_error.lock() = None;
+    } else {
+        // platform_org가 None이면 옛 prepaid 값이 stale로 남지 않도록 즉시 비움
+        // (사용자가 wizard에서 platform UUID를 지웠을 때 trayMode "all" 라벨이
+        // 옛 $X.XX를 계속 표시하는 회귀를 막음).
+        let no_platform = api_state()
+            .config
+            .lock()
+            .as_ref()
+            .map(|(_, _, p, _)| p.is_none())
+            .unwrap_or(true);
+        if no_platform {
+            *api_state().prepaid.lock() = None;
+            *api_state().prepaid_error.lock() = None;
+        }
     }
     Ok(())
 }
 
+/// 설정 wizard "테스트" 버튼 응답. usage 결과는 항상 채워지고(이 호출이
+/// 실패하면 함수 전체가 Err로 빠짐), prepaid는 platform_org_id가 들어왔을
+/// 때만 시도. prepaid 호출 실패해도 usage는 살아있으므로 prepaid_error
+/// 필드로 따로 보고 → wizard가 한 줄에 "usage X% · prepaid err: ..."처럼
+/// 합쳐 보여줄 수 있다.
+#[derive(serde::Serialize)]
+struct TestApiResult {
+    #[serde(flatten)]
+    usage: ApiUsage,
+    prepaid_dollars: Option<f64>,
+    prepaid_error: Option<String>,
+}
+
 #[tauri::command]
-fn test_api_config(org_id: String, cookie: String) -> Result<ApiUsage, String> {
-    claude_api::fetch_usage(&org_id, &cookie)
+fn test_api_config(
+    org_id: String,
+    cookie: String,
+    platform_org_id: Option<String>,
+    platform_cookie: Option<String>,
+) -> Result<TestApiResult, String> {
+    let usage = claude_api::fetch_usage(&org_id, &cookie)?;
+    let platform_org = platform_org_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let platform_ck = platform_cookie
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(cookie.as_str());
+    let (prepaid_dollars, prepaid_error) = match platform_org {
+        Some(platform) => match claude_api::fetch_prepaid_credits(platform, platform_ck) {
+            Ok(d) => (Some(d), None),
+            Err(e) => (None, Some(e)),
+        },
+        None => (None, None),
+    };
+    Ok(TestApiResult {
+        usage,
+        prepaid_dollars,
+        prepaid_error,
+    })
 }
 
 /// While Settings is open, drop the panel from
@@ -412,7 +493,7 @@ fn settings_focus(app: AppHandle, open: bool) -> Result<(), String> {
 fn refresh_usage(app: AppHandle) -> Result<(), String> {
     emit_snapshot(&app);
     let cfg = api_state().config.lock().clone();
-    if let Some((org, cookie)) = cfg {
+    if let Some((org, cookie, platform_org, platform_cookie)) = cfg {
         let app_clone = app.clone();
         std::thread::spawn(move || {
             match claude_api::fetch_usage(&org, &cookie) {
@@ -429,17 +510,31 @@ fn refresh_usage(app: AppHandle) -> Result<(), String> {
                     maybe_popup_settings_for_auth(&app_clone, &err_for_popup);
                 }
             }
-            fetch_and_store_prepaid(&org, &cookie);
+            // platform_cookie가 있으면 그걸로, 없으면 메인 cookie를 fallback.
+            // 일부 계정은 claude.ai 쿠키가 platform에서도 동작하지만 대부분은
+            // 403이 떨어지므로 사용자가 별도 쿠키를 채우게 함(설정창에서).
+            let prepaid_cookie = platform_cookie.as_deref().unwrap_or(&cookie);
+            fetch_and_store_prepaid(platform_org.as_deref(), prepaid_cookie);
             emit_snapshot(&app_clone);
         });
     }
     Ok(())
 }
 
-/// usage 호출과 같은 자격증명으로 prepaid 잔액을 호출해 글로벌 state에 저장한다.
-/// usage 와 별개라 실패해도 usage 값에는 영향 없음. 호출처가 emit_snapshot을
-/// 책임지므로 여기서는 emit 안 함.
-fn fetch_and_store_prepaid(org: &str, cookie: &str) {
+/// prepaid 잔액을 platform.claude.com에서 받아 글로벌 state에 저장한다.
+/// `platform_org`가 None이면(사용자가 wizard에 platform UUID를 안 넣었을 때)
+/// 호출 자체를 안 하고 상태를 *깨끗이 비운다*. usage 와 별개라 어느 한 쪽이
+/// 실패해도 다른 쪽은 살린다. 호출처가 emit_snapshot을 책임지므로 여기서는
+/// emit 안 함.
+fn fetch_and_store_prepaid(platform_org: Option<&str>, cookie: &str) {
+    let Some(org) = platform_org else {
+        // platform UUID 없음 → prepaid 기능 비활성. 옛 값이 stale로 남지
+        // 않도록 명시적으로 비워둔다 (v1.50 회귀: 옛 $225 sentinel이 계속
+        // 표시되던 케이스).
+        *api_state().prepaid.lock() = None;
+        *api_state().prepaid_error.lock() = None;
+        return;
+    };
     match claude_api::fetch_prepaid_credits(org, cookie) {
         Ok(dollars) => {
             *api_state().prepaid.lock() = Some(PrepaidCredits {
@@ -449,6 +544,9 @@ fn fetch_and_store_prepaid(org: &str, cookie: &str) {
             *api_state().prepaid_error.lock() = None;
         }
         Err(e) => {
+            // 에러 시 옛 값을 stale로 두지 않고 None으로 비움. 메시지만
+            // 따로 보관해서 UI가 원하면 보여주게.
+            *api_state().prepaid.lock() = None;
             *api_state().prepaid_error.lock() = Some(e);
         }
     }
@@ -747,7 +845,7 @@ fn maybe_popup_settings_for_auth(app: &AppHandle, err: &str) {
 fn start_api_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
         let cfg = api_state().config.lock().clone();
-        if let Some((org, cookie)) = cfg {
+        if let Some((org, cookie, platform_org, platform_cookie)) = cfg {
             match claude_api::fetch_usage(&org, &cookie) {
                 Ok(api) => {
                     *api_state().latest.lock() = Some(api);
@@ -762,7 +860,8 @@ fn start_api_poller(app: AppHandle) {
                     maybe_popup_settings_for_auth(&app, &err_for_popup);
                 }
             }
-            fetch_and_store_prepaid(&org, &cookie);
+            let prepaid_cookie = platform_cookie.as_deref().unwrap_or(&cookie);
+            fetch_and_store_prepaid(platform_org.as_deref(), prepaid_cookie);
             emit_snapshot(&app);
         }
         std::thread::sleep(Duration::from_secs(30));

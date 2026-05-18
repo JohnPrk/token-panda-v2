@@ -133,13 +133,18 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
     await invoke("set_api_config", {
       orgId: active.orgId,
       cookie: active.cookie,
+      platformOrgId: active.platformOrgId ?? null,
+      platformCookie: active.platformCookie ?? null,
     }).catch(() => {});
     await invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
     await invoke("refresh_usage").catch(() => {});
   } else {
-    await invoke("set_api_config", { orgId: null, cookie: null }).catch(
-      () => {},
-    );
+    await invoke("set_api_config", {
+      orgId: null,
+      cookie: null,
+      platformOrgId: null,
+      platformCookie: null,
+    }).catch(() => {});
   }
   await invoke("update_tray_accounts", {
     accounts: next.accounts.map((a) => ({ id: a.id, label: a.label })),
@@ -289,6 +294,8 @@ function PetApp() {
           invoke("set_api_config", {
             orgId: active.orgId,
             cookie: active.cookie,
+            platformOrgId: active.platformOrgId ?? null,
+            platformCookie: active.platformCookie ?? null,
           }).catch(() => {});
           invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
           invoke("update_tray_accounts", {
@@ -988,12 +995,6 @@ function Pet({
             weeklyRemaining={d.petState === "disconnected" ? 0 : d.weeklyRemaining}
             fiveResetMs={d.petState === "disconnected" ? null : d.fiveHourResetMs}
             weeklyResetMs={d.petState === "disconnected" ? null : d.weeklyResetMs}
-            prepaidDollars={
-              d.petState !== "disconnected" &&
-              (config.trayMode ?? "fivehour") === "all"
-                ? snap.prepaid?.dollars ?? null
-                : null
-            }
           />
         )}
       </div>
@@ -1127,13 +1128,11 @@ function UsageBubble({
   weeklyRemaining,
   fiveResetMs,
   weeklyResetMs,
-  prepaidDollars,
 }: {
   fiveRemaining: number;
   weeklyRemaining: number;
   fiveResetMs: number | null;
   weeklyResetMs: number | null;
-  prepaidDollars: number | null;
 }) {
   return (
     <div className="bubble usage" data-tauri-drag-region>
@@ -1161,17 +1160,6 @@ function UsageBubble({
           {weeklyResetMs !== null ? formatResetCountdown(weeklyResetMs) : "—"}
         </span>
       </div>
-      {prepaidDollars !== null && (
-        <div className="usage-row" data-tauri-drag-region>
-          <span className="usage-label" data-tauri-drag-region>$</span>
-          <span className="usage-pct ok" data-tauri-drag-region>
-            {`$${prepaidDollars.toFixed(2)}`}
-          </span>
-          <span className="usage-reset" data-tauri-drag-region>
-            prepaid
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -1435,6 +1423,12 @@ function AccountForm({
   const [skin, setSkin] = useState(existing?.skinId ?? DEFAULT_SKIN_ID);
   const [orgId, setOrgId] = useState(existing?.orgId ?? "");
   const [cookie, setCookie] = useState(existing?.cookie ?? "");
+  const [platformOrgId, setPlatformOrgId] = useState(
+    existing?.platformOrgId ?? "",
+  );
+  const [platformCookie, setPlatformCookie] = useState(
+    existing?.platformCookie ?? "",
+  );
   const [testStatus, setTestStatus] = useState<string>("");
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
@@ -1475,14 +1469,35 @@ function AccountForm({
       return;
     }
     setTestStatus("테스트 중...");
+    const trimmedPlatform = platformOrgId.trim();
+    const trimmedPlatformCookie = platformCookie.trim();
     try {
-      const res = await invoke<{ five_hour_pct: number; weekly_pct: number }>(
-        "test_api_config",
-        { orgId: orgId.trim(), cookie: cookie.trim() },
-      );
-      setTestStatus(
-        `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`,
-      );
+      const res = await invoke<{
+        five_hour_pct: number;
+        weekly_pct: number;
+        prepaid_dollars: number | null;
+        prepaid_error: string | null;
+      }>("test_api_config", {
+        orgId: orgId.trim(),
+        cookie: cookie.trim(),
+        platformOrgId: trimmedPlatform || null,
+        platformCookie: trimmedPlatformCookie || null,
+      });
+      const usagePart = `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`;
+      let prepaidPart = "";
+      if (trimmedPlatform) {
+        if (res.prepaid_dollars !== null) {
+          prepaidPart = ` · prepaid $${res.prepaid_dollars.toFixed(2)}`;
+        } else if (res.prepaid_error) {
+          // 응답 너무 길면 잘라서 한 줄로. wizard 폭이 좁아 풀 메시지가
+          // 가로로 터지면 더 헷갈림.
+          const short = res.prepaid_error.length > 60
+            ? res.prepaid_error.slice(0, 60) + "…"
+            : res.prepaid_error;
+          prepaidPart = ` · prepaid 실패: ${short}`;
+        }
+      }
+      setTestStatus(usagePart + prepaidPart);
     } catch (e: unknown) {
       setTestStatus(String(e));
     }
@@ -1493,12 +1508,20 @@ function AccountForm({
       setTestStatus("Org ID와 쿠키를 모두 채워주세요.");
       return;
     }
+    const trimmedPlatform = platformOrgId.trim();
+    const trimmedPlatformCookie = platformCookie.trim();
     onSubmit({
       id: existing?.id ?? cryptoRandomId(),
       label: label.trim() || "이름 없음",
       orgId: orgId.trim(),
       cookie: cookie.trim(),
       skinId: skin,
+      // 빈 값은 undefined로 정규화. Account.platformOrgId/Cookie가 optional이라
+      // 빈 문자열을 흘려보내면 Rust 쪽 정규화에 의존하게 됨.
+      ...(trimmedPlatform ? { platformOrgId: trimmedPlatform } : {}),
+      ...(trimmedPlatformCookie
+        ? { platformCookie: trimmedPlatformCookie }
+        : {}),
     });
   };
 
@@ -1586,6 +1609,42 @@ function AccountForm({
           rows={4}
           spellCheck={false}
         />
+      </label>
+      <label>
+        Platform Org UUID <span className="field-optional">(선택)</span>
+        <input
+          type="text"
+          placeholder="e25725d1-78db-40f8-a555-68593feb25bb"
+          value={platformOrgId}
+          onChange={(e) => setPlatformOrgId(e.target.value)}
+          spellCheck={false}
+        />
+        <span className="field-hint">
+          prepaid 잔액을 트레이 "5h+주간+$" 모드에서 보고 싶을 때만 채워주세요.
+          비워두면 prepaid 호출 자체를 안 합니다. 값은{" "}
+          <code>platform.claude.com/settings/billing</code> → DevTools → Network 탭의{" "}
+          <code>prepaid/credits</code> 요청 URL에서 추출.
+          <strong> claude.ai의 Org ID와 완전히 다른 UUID</strong>예요.
+        </span>
+      </label>
+      <label>
+        Platform Cookie <span className="field-optional">(선택)</span>
+        <textarea
+          placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
+          value={platformCookie}
+          onChange={(e) => setPlatformCookie(e.target.value)}
+          rows={3}
+          spellCheck={false}
+        />
+        <span className="field-hint">
+          위 Platform Org UUID로 호출했는데 <code>HTTP 403</code>이 떨어지면
+          채워주세요. <strong>platform.claude.com</strong>은 claude.ai와{" "}
+          <strong>별도 쿠키 컨텍스트</strong>예요. 같은{" "}
+          <code>platform.claude.com/settings/billing</code> 페이지의 DevTools →
+          Network 탭에서 <code>prepaid/credits</code> 요청 → Headers →{" "}
+          <code>cookie:</code> 한 줄 통째로 복사. 비워두면 위쪽 세션 쿠키를
+          그대로 시도합니다.
+        </span>
       </label>
       <div className="api-actions">
         <button type="button" onClick={autoCapture}>

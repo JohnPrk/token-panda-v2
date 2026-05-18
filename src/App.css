@@ -1947,6 +1947,27 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
+.account-form .field-optional {
+  color: #9990a8;
+  font-weight: normal;
+  font-size: 10px;
+  margin-left: 4px;
+}
+.account-form .field-hint {
+  color: #777088;
+  font-size: 10px;
+  line-height: 1.45;
+  margin-top: 2px;
+}
+.account-form .field-hint code {
+  background: #f0edf6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.account-form .field-hint strong {
+  color: #5c4ecc;
+}
 @media (prefers-color-scheme: dark) {
   .accounts-label { color: #aaa; }
   .account-tile-label { color: #ececf6; }
@@ -1961,6 +1982,19 @@
   body:not(.settings-window-host) .account-form {
     background: rgba(155, 133, 255, 0.08);
     border-color: rgba(155, 133, 255, 0.25);
+  }
+  body:not(.settings-window-host) .account-form .field-optional {
+    color: #807793;
+  }
+  body:not(.settings-window-host) .account-form .field-hint {
+    color: #a59cbd;
+  }
+  body:not(.settings-window-host) .account-form .field-hint code {
+    background: rgba(255, 255, 255, 0.08);
+    color: #c8c1de;
+  }
+  body:not(.settings-window-host) .account-form .field-hint strong {
+    color: #b8a4ff;
   }
 }
 

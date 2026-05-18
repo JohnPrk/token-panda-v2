@@ -273,6 +273,10 @@ pub fn fetch_prepaid_credits(org_id: &str, cookie: &str) -> Result<f64, String> 
 /// prepaid/credits 응답을 dollars로 변환. 콘솔에서 안 보이는 정확한 필드명을
 /// 모르는 상태라 여러 후보를 시도한다. cents 단위가 의심되는 큰 정수(>=1000)는
 /// 100으로 나눠 dollars로 본다. credits[] 배열은 모두 합산한다.
+///
+/// 음수 후보는 잔액으로 해석 불가(prepaid는 0 이상)이므로 건너뛴다. 실제
+/// 응답이 `{amount: -1, ...}` 형태로 auto_reload threshold 같은 sentinel을
+/// 흘려보낼 때 펫에 "$-1.00"이 박히는 회귀를 막는다.
 pub fn parse_prepaid_credits(root: &serde_json::Value) -> Option<f64> {
     // 1) 단일 필드 후보들 (dollars 가정).
     let direct_dollar_keys = [
@@ -288,7 +292,10 @@ pub fn parse_prepaid_credits(root: &serde_json::Value) -> Option<f64> {
     ];
     for k in direct_dollar_keys {
         if let Some(v) = root.get(k).and_then(|v| v.as_f64()) {
-            return Some(round2(coerce_dollars(v)));
+            let dollars = round2(coerce_dollars(v));
+            if dollars >= 0.0 {
+                return Some(dollars);
+            }
         }
     }
 
@@ -302,7 +309,10 @@ pub fn parse_prepaid_credits(root: &serde_json::Value) -> Option<f64> {
     ];
     for k in cents_keys {
         if let Some(v) = root.get(k).and_then(|v| v.as_f64()) {
-            return Some(round2(v / 100.0));
+            let dollars = round2(v / 100.0);
+            if dollars >= 0.0 {
+                return Some(dollars);
+            }
         }
     }
 
@@ -533,5 +543,44 @@ mod tests {
     fn prepaid_rounds_to_two_decimals() {
         let r = json!({"balance": 12.3456});
         assert_eq!(parse_prepaid_credits(&r), Some(12.35));
+    }
+
+    #[test]
+    fn prepaid_real_response_amount_in_cents() {
+        // 실제 platform.claude.com /prepaid/credits 응답 형태.
+        // amount: 1290 (cents) → $12.90.
+        let r = json!({
+            "amount": 1290,
+            "currency": "USD",
+            "auto_reload_settings": null,
+            "pending_invoice_amount_cents": null,
+            "last_paid_purchase_cents": 1500
+        });
+        assert_eq!(parse_prepaid_credits(&r), Some(12.90));
+    }
+
+    #[test]
+    fn prepaid_skips_negative_amount_sentinel() {
+        // API가 auto_reload threshold flag로 amount=-1을 흘려보내는 경우
+        // 잔액으로 잘못 표시되면 안 됨. 음수면 후보 건너뛰고 None 반환.
+        let r = json!({"amount": -1});
+        assert_eq!(parse_prepaid_credits(&r), None);
+    }
+
+    #[test]
+    fn prepaid_skips_negative_amount_and_picks_next_positive() {
+        // amount가 -1 sentinel이어도 다른 후보(balance_cents 등)가 있으면
+        // 그걸 골라서 잔액을 살린다.
+        let r = json!({
+            "amount": -1,
+            "balance_cents": 1290
+        });
+        assert_eq!(parse_prepaid_credits(&r), Some(12.90));
+    }
+
+    #[test]
+    fn prepaid_negative_cents_value_is_skipped() {
+        let r = json!({"amount_cents": -100});
+        assert_eq!(parse_prepaid_credits(&r), None);
     }
 }
