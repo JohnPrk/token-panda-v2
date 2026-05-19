@@ -344,10 +344,11 @@ pub fn parse_prepaid_credits(root: &serde_json::Value) -> Option<f64> {
 }
 
 fn coerce_dollars(v: f64) -> f64 {
-    // 정수이고 1000 이상이면 cents일 가능성이 매우 높음. dollars로 그렇게 큰
-    // prepaid 잔액(>= $1,000)은 일반 개인 계정에선 드물고, 반대로 $12.34를
-    // cents(1234)로 줄 때 정수로 떨어진다.
-    if v.fract() == 0.0 && v.abs() >= 1000.0 {
+    // API(/prepaid/credits)는 잔액을 항상 cents 정수로 보낸다 (예: $9.63 → 963,
+    // $12.34 → 1234). raw 963 을 dollars 로 오인해 $963.00 으로 표시하는 회귀를
+    // 막기 위해 정수면 무조건 cents 로 해석한다. dollars 단위로 오는 표현은 항상
+    // 소수 자릿수가 있어 v.fract() != 0 으로 자연스럽게 분리된다.
+    if v.fract() == 0.0 {
         return v / 100.0;
     }
     v
@@ -495,16 +496,34 @@ mod tests {
 
     #[test]
     fn prepaid_coerces_large_integer_to_dollars_via_cents_heuristic() {
-        // 1500은 정수 + 1000 이상 → cents로 해석 → $15.00
+        // 1500은 정수 → cents로 해석 → $15.00
         let r = json!({"balance": 1500});
         assert_eq!(parse_prepaid_credits(&r), Some(15.0));
     }
 
     #[test]
     fn prepaid_keeps_small_dollar_number_intact() {
-        // 12.0은 정수이지만 1000 미만 → dollars 그대로 $12.00
+        // 12 는 정수이므로 cents 로 해석 → $0.12. v1.74 에서 임계 폐기 (사용자 명시 OK)
+        // 이전엔 1000 미만이면 dollars 로 봤지만, API 가 항상 cents 로 보내는 게
+        // 확인돼 휴리스틱을 단순화. dollars 단위 응답은 항상 소수점이 있어 fract != 0
+        // 분기로 분리된다.
         let r = json!({"balance": 12});
-        assert_eq!(parse_prepaid_credits(&r), Some(12.0));
+        assert_eq!(parse_prepaid_credits(&r), Some(0.12));
+    }
+
+    #[test]
+    fn prepaid_three_digit_integer_treated_as_cents() {
+        // v1.74 회귀 케이스: raw 963 → $9.63. v1.73 까지는 963 < 1000 이라
+        // dollars 로 잘못 해석되어 트레이에 $963.00 으로 표시됐다 (사용자 실측).
+        let r = json!({"amount": 963});
+        assert_eq!(parse_prepaid_credits(&r), Some(9.63));
+    }
+
+    #[test]
+    fn prepaid_small_dollar_float_still_treated_as_dollars() {
+        // 소수점이 있는 float 은 그대로 dollars. 정수만 cents 로 해석한다.
+        let r = json!({"balance": 9.63});
+        assert_eq!(parse_prepaid_credits(&r), Some(9.63));
     }
 
     #[test]
@@ -516,8 +535,12 @@ mod tests {
                 {"balance": 2.25}
             ]
         });
-        // 5.0 + 7.5 + 2.25 = 14.75
-        assert_eq!(parse_prepaid_credits(&r), Some(14.75));
+        // v1.74 임계 폐기 (사용자 명시 OK): 정수면 cents.
+        // balance: 5.0 (정수) → cents → $0.05
+        // amount_cents: 750 → $7.50
+        // balance: 2.25 (소수) → dollars → $2.25
+        // 합: $9.80
+        assert_eq!(parse_prepaid_credits(&r), Some(9.80));
     }
 
     #[test]
@@ -732,8 +755,9 @@ mod tests {
                 {"amount_cents": 250}
             ]
         });
-        // 음수 1번은 None → 합산 안 됨. 5.0 + 2.50 = 7.50.
-        assert_eq!(parse_prepaid_credits(&r), Some(7.50));
+        // v1.74 임계 폐기: 정수 5.0 → cents → $0.05, amount_cents 250 → $2.50.
+        // 음수 1번은 None → 합산 안 됨. 0.05 + 2.50 = 2.55.
+        assert_eq!(parse_prepaid_credits(&r), Some(2.55));
     }
 
     #[test]
@@ -751,14 +775,16 @@ mod tests {
 
     #[test]
     fn coerce_dollars_at_exact_thousand_treated_as_cents() {
-        // 1000 정확히 + fract=0 → cents 로 해석 → $10.00.
+        // 1000 + fract=0 → cents → $10.00.
         assert_eq!(coerce_dollars(1000.0), 10.0);
     }
 
     #[test]
     fn coerce_dollars_just_below_thousand_kept_as_dollars() {
-        // 999 + fract=0 → dollars 그대로 (1000 미만은 $999 일 수도 있음).
-        assert_eq!(coerce_dollars(999.0), 999.0);
+        // v1.74 임계 폐기: 999 도 정수면 cents → $9.99.
+        // (v1.73 까지는 1000 미만 정수를 dollars 로 봤지만, API 가 항상 cents
+        // 정수를 보낸다는 사용자 실측 보고로 임계를 제거.)
+        assert_eq!(coerce_dollars(999.0), 9.99);
     }
 
     #[test]
@@ -769,9 +795,16 @@ mod tests {
 
     #[test]
     fn coerce_dollars_negative_large_integer_treated_as_cents() {
-        // abs() >= 1000 + fract=0 분기. (음수가 흘러들면 직접 호출 시점에서는 cents 로 보지만
-        // 호출자가 parse_prepaid_credits 의 `dollars >= 0.0` 가드로 걸러냄.)
+        // 음수가 흘러들면 직접 호출 시점에서는 cents 로 보지만 호출자가
+        // parse_prepaid_credits 의 `dollars >= 0.0` 가드로 걸러냄.
         assert_eq!(coerce_dollars(-2000.0), -20.0);
+    }
+
+    #[test]
+    fn coerce_dollars_three_digit_treated_as_cents_after_threshold_removal() {
+        // v1.74 회귀 케이스: raw 963 → $9.63. v1.73 까지는 963 < 1000 이라
+        // dollars 로 잘못 해석되어 트레이에 $963.00 표시.
+        assert_eq!(coerce_dollars(963.0), 9.63);
     }
 
     #[test]
