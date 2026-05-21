@@ -12,7 +12,13 @@ const createStore = require("./store.cjs");
 const updater = require("./updater.cjs");
 const installer = require("./installer.cjs");
 const spaces = require("./spaces.cjs");
-const { isAuthFailure, formatUpdateCheckLabel, formatHeaderLabel, bambooTierForRemaining } = require("./helpers.cjs");
+const usage = require("./usage.cjs");
+const {
+  isAuthFailure,
+  formatUpdateCheckLabel,
+  formatHeaderLabel,
+  pickTrayTierForState,
+} = require("./helpers.cjs");
 
 app.setName("token-panda");
 
@@ -51,6 +57,10 @@ let lastError = null;
 let pollTimer = null;
 let prepaid = null; // { dollars, fetched_at } | null
 let prepaidError = null; // string | null
+
+// ~/.claude/projects/**/*.jsonl 파싱 결과 캐시. pollOnce 마다 갱신.
+// active_sessions, 5h/주간 토큰, cache hit/miss/콤보 등 JSONL 유래 필드 출처.
+let usageSnap = null;
 
 // 업데이트 체커 (1h 폴링) 상태. updateInfo = 새 버전 있음(없으면 null),
 // lastUpdateCheck = 마지막 polling 시각 + 성공 여부 (트레이 헤더 표시용),
@@ -174,27 +184,40 @@ function broadcast(event, payload) {
   }
 }
 
+// usage.snapshot() 한 번 굴려 캐시 갱신. 동기 I/O 라 빠르고, 실패해도 이전
+// 캐시 유지 (네트워크 블립 같은 흔들림 없게). JSONL 파일이 없으면 빈 스냅샷.
+function pollUsageSnapshot() {
+  try {
+    usageSnap = usage.snapshot();
+  } catch (e) {
+    console.error("[usage] snapshot failed:", e && e.message ? e.message : e);
+  }
+}
+
 function buildSnapshot() {
+  const u = usageSnap;
   return {
-    five_hour_tokens: 0,
-    weekly_tokens: 0,
-    last_request_at: null,
-    last_user_prompt_at: null,
-    is_thinking: false,
-    five_hour_window_start: null,
-    five_hour_resets_at: latest ? latest.five_hour_resets_at : null,
-    weekly_window_start: null,
-    weekly_resets_at: latest ? latest.weekly_resets_at : null,
-    cache_hits_5min: 0,
-    cache_misses_5min: 0,
-    current_combo: 0,
-    last_cache_hit: null,
+    five_hour_tokens: u ? u.five_hour_tokens : 0,
+    weekly_tokens: u ? u.weekly_tokens : 0,
+    last_request_at: u ? u.last_request_at : null,
+    last_user_prompt_at: u ? u.last_user_prompt_at : null,
+    is_thinking: u ? u.is_thinking : false,
+    five_hour_window_start: u ? u.five_hour_window_start : null,
+    // claude.ai API 가 살아있으면 그 reset 시각을 우선 (서버 truth). 없으면
+    // JSONL anchor 기반 fallback.
+    five_hour_resets_at: latest ? latest.five_hour_resets_at : (u ? u.five_hour_resets_at : null),
+    weekly_window_start: u ? u.weekly_window_start : null,
+    weekly_resets_at: latest ? latest.weekly_resets_at : (u ? u.weekly_resets_at : null),
+    cache_hits_5min: u ? u.cache_hits_5min : 0,
+    cache_misses_5min: u ? u.cache_misses_5min : 0,
+    current_combo: u ? u.current_combo : 0,
+    last_cache_hit: u ? u.last_cache_hit : null,
     now: new Date().toISOString(),
     api: latest,
     api_error: lastError,
     prepaid: prepaid,
     prepaid_error: prepaidError,
-    active_sessions: [],
+    active_sessions: u ? u.active_sessions : [],
   };
 }
 
@@ -219,6 +242,10 @@ async function pollPrepaid() {
 }
 
 async function pollOnce() {
+  // JSONL 파싱은 apiConfig 유무와 무관 — 사용자가 claude.ai 쿠키를 안 넣어도
+  // 로컬 ~/.claude/projects 만 있으면 active_sessions / 5h·주간 토큰 / cache
+  // hit·miss 가 다 살아남.
+  pollUsageSnapshot();
   if (!apiConfig) {
     broadcast("usage-update", buildSnapshot());
     return;
@@ -240,6 +267,8 @@ async function pollOnce() {
 
 function startPoller() {
   if (pollTimer) clearInterval(pollTimer);
+  // 첫 폴 즉시 — apiConfig 없을 때도 JSONL 카드가 곧장 뜨게.
+  pollUsageSnapshot();
   pollTimer = setInterval(pollOnce, 30000);
 }
 
@@ -377,18 +406,18 @@ function defaultTrayImage() {
   return img.isEmpty() ? trayImage(ICON) : img;
 }
 
-// 5h 모드일 때만 잔량별 컬러 대나무(build/tray/tray-<tier>.png, 4→1 줄기) 노출.
-// 그 외(5h+주간, 5h+주간+$) 모드에선 사용자 요청대로 아이콘 자체를 빼고
-// 텍스트 라벨만 메뉴바에 남김 (nativeImage.createEmpty()).
+// tier 결정은 helpers.cjs:pickTrayTierForState 가 담당 (platform/mode/잔량 → tier|null).
+// null 이면 아이콘 비움(메뉴바 텍스트만 노출, macOS non-fivehour 모드).
+// 그 외(macOS fivehour, Windows 모든 모드)는 build/tray/tray-<tier>.png 사용.
 function applyTrayIcon() {
   if (!tray) return;
-  if (trayMode === "fivehour") {
-    const tier = bambooTierForRemaining(lastRemaining);
-    const img = trayImage(path.join(RESOURCE_ROOT, "build", "tray", `tray-${tier}.png`));
-    tray.setImage(img.isEmpty() ? defaultTrayImage() : img);
-  } else {
+  const tier = pickTrayTierForState(process.platform, trayMode, lastRemaining);
+  if (tier == null) {
     tray.setImage(nativeImage.createEmpty());
+    return;
   }
+  const img = trayImage(path.join(RESOURCE_ROOT, "build", "tray", `tray-${tier}.png`));
+  tray.setImage(img.isEmpty() ? defaultTrayImage() : img);
 }
 
 function createTray() {

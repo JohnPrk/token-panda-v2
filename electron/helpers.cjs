@@ -52,4 +52,24 @@ function bambooTierForRemaining(remaining) {
   return "25";
 }
 
-module.exports = { isAuthFailure, formatUpdateCheckLabel, formatHeaderLabel, bambooTierForRemaining };
+// 트레이 아이콘에 어떤 tier 를 띄울지 결정. 반환값: "25"/"50"/"75"/"100" 중 하나면
+// build/tray/tray-<tier>.png, null 이면 아이콘을 비워 메뉴바 텍스트만 남김.
+//
+// macOS 메뉴바는 `tray.setTitle()` 텍스트 라벨을 곁에 띄울 수 있어, 5h 모드에서만
+// 잔량별 컬러 대나무를 보여주고 다른 모드(5h+주간, 5h+주간+$) 는 아이콘을 빼는
+// 사용자 의도가 통한다. 반면 Windows 작업표시줄은 setTitle 이 노출되지 않아
+// 아이콘을 비우면 앱 자체가 안 보임 → 사용자가 우클릭 메뉴에 접근할 표면이
+// 사라진다. 그래서 Windows 는 모드와 무관하게 항상 100% 대나무 (4 줄기) 고정.
+function pickTrayTierForState(platform, trayMode, remaining) {
+  if (platform === "win32") return "100";
+  if (trayMode === "fivehour") return bambooTierForRemaining(remaining);
+  return null;
+}
+
+module.exports = {
+  isAuthFailure,
+  formatUpdateCheckLabel,
+  formatHeaderLabel,
+  bambooTierForRemaining,
+  pickTrayTierForState,
+};

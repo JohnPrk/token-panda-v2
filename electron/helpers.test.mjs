@@ -10,7 +10,13 @@
 
 import { describe, it, expect } from "vitest";
 import helpers from "./helpers.cjs";
-const { isAuthFailure, formatUpdateCheckLabel, formatHeaderLabel, bambooTierForRemaining } = helpers;
+const {
+  isAuthFailure,
+  formatUpdateCheckLabel,
+  formatHeaderLabel,
+  bambooTierForRemaining,
+  pickTrayTierForState,
+} = helpers;
 
 describe("isAuthFailure", () => {
   it("matches HTTP 401 anywhere in message", () => {
@@ -112,5 +118,28 @@ describe("bambooTierForRemaining", () => {
     expect(bambooTierForRemaining(NaN)).toBe("25");
     expect(bambooTierForRemaining(undefined)).toBe("25");
     expect(bambooTierForRemaining(-0.5)).toBe("25");
+  });
+});
+
+describe("pickTrayTierForState", () => {
+  it("macOS fivehour mode: tier follows remaining", () => {
+    expect(pickTrayTierForState("darwin", "fivehour", 1)).toBe("100");
+    expect(pickTrayTierForState("darwin", "fivehour", 0.6)).toBe("75");
+    expect(pickTrayTierForState("darwin", "fivehour", 0.3)).toBe("50");
+    expect(pickTrayTierForState("darwin", "fivehour", 0.1)).toBe("25");
+  });
+
+  it("macOS non-fivehour modes: null (icon empty, text-only label)", () => {
+    expect(pickTrayTierForState("darwin", "both", 0.5)).toBe(null);
+    expect(pickTrayTierForState("darwin", "all", 0.5)).toBe(null);
+  });
+
+  it("Windows always returns 100 regardless of mode or remaining", () => {
+    // 작업표시줄은 setTitle 노출 안 됨 → 아이콘 비우면 앱 자체가 안 보임.
+    // 모드/잔량 무관 가장 풀 대나무 (4 줄기) 고정.
+    expect(pickTrayTierForState("win32", "fivehour", 0)).toBe("100");
+    expect(pickTrayTierForState("win32", "fivehour", 1)).toBe("100");
+    expect(pickTrayTierForState("win32", "both", 0.3)).toBe("100");
+    expect(pickTrayTierForState("win32", "all", 0.1)).toBe("100");
   });
 });
