@@ -725,15 +725,10 @@ fn open_settings_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // v1.75: query string (`?view=settings`) 대신 hash(`#view=settings`)로
-    // 라우팅. Tauri 2 의 `WebviewUrl::App(PathBuf)` 는 path-like 문자열을
-    // platform 별 자산 프로토콜 URL 로 변환하는데, Windows WebView2 경로에서
-    // `?` 가 URL-encode 되거나 navigation 단계에서 query 가 떨어져
-    // `location.search` 가 비는 회귀가 v1.74 Phase 1 빌드에서 확인됨
-    // (사용자 스크린샷: 온보딩 창 제목만 뜨고 안엔 PetApp 의 리사이즈 핸들 +
-    // 그림자만 보임 → `viewFromUrl()` 이 null 반환 → 디폴트 분기로 PetApp 렌더).
-    // Hash 는 URL 파싱·percent-encode 영향 없이 fragment 로 보존돼 양 OS 동일하게 동작.
-    let url = WebviewUrl::App("index.html#view=settings".into());
+    // 멀티페이지: 설정 창은 자기 전용 진입점(settings.html)을 로드한다.
+    // settings.html → settings-main.tsx → <SettingsApp/> 로 곧장 렌더되므로
+    // 과거의 hash/query/라벨 추측이 전부 불필요해졌다 (App.tsx 상단 주석 참고).
+    let url = WebviewUrl::App("settings.html".into());
     // Bumped from 440×620 to 600×680 — at the narrower size the
     // "API 연동" link and the "🔔 어떻게 연결되나요?" chip wrapped onto
     // two lines and clipped the cookie-flow diagram inside the help
@@ -748,16 +743,9 @@ fn open_settings_window(app: AppHandle) -> Result<(), String> {
         .always_on_top(false)
         .skip_taskbar(false)
         .visible(true)
-        // v1.75: Cargo `devtools` feature 만으로는 WebView2 우클릭 inspector
-        // 가 안 켜진다. builder 에 명시적으로 활성. F12 단축키 + 우클릭 →
-        // Inspect 둘 다 동작. release 빌드에서도 디버깅 동선 유지.
-        .devtools(true)
-        // v1.74.6: Windows WebView2에서 `__TAURI_INTERNALS__` 주입이 인라인
-        // script보다 늦게 도착하는 레이스가 관찰됨 → 라벨 조회 실패 → PetApp
-        // 으로 떨어지는 회귀. initialization_script 는 navigation 전에 박혀
-        // 어떤 페이지 JS보다 먼저 실행되므로 sentinel 글로벌로 라벨을 박아
-        // 인라인 가드/main.tsx/App.tsx 가 안전하게 1순위로 읽도록 한다.
-        .initialization_script("window.__TAURI_VIEW_LABEL__='settings';");
+        // Cargo `devtools` feature 만으로는 WebView2 우클릭 inspector 가 안
+        // 켜진다. builder 에 명시적으로 활성. F12 + 우클릭 → Inspect 둘 다 동작.
+        .devtools(true);
 
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_focus();
@@ -779,8 +767,9 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // v1.75: hash 라우팅 + devtools 명시. 사유는 open_settings_window 참고.
-    let url = WebviewUrl::App("index.html#view=onboarding".into());
+    // 멀티페이지: 시작하기 창은 자기 전용 진입점(onboarding.html)을 로드한다.
+    // 사유는 open_settings_window 참고.
+    let url = WebviewUrl::App("onboarding.html".into());
     let builder = WebviewWindowBuilder::new(&app, "onboarding", url)
         .title("토큰 판다 — 시작하기")
         .inner_size(640.0, 760.0)
@@ -792,11 +781,7 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
         .skip_taskbar(false)
         .center()
         .visible(true)
-        .devtools(true)
-        // v1.74.6: open_settings_window 와 동일 사유. Windows WebView2 에서
-        // `__TAURI_INTERNALS__` 주입 레이스로 라벨 조회가 실패해 PetApp 이
-        // 시작하기 창에 렌더되는 회귀 확인 → sentinel 글로벌로 박아 우회.
-        .initialization_script("window.__TAURI_VIEW_LABEL__='onboarding';");
+        .devtools(true);
 
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_focus();

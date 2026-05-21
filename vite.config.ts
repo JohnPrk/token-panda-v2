@@ -1,16 +1,10 @@
 import { defineConfig, type Plugin } from 'vite'
+import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 
-// v1.75: Vite 8 이 생성하는 `<script type="module" crossorigin>` /
-// `<link rel="modulepreload" crossorigin>` / `<link rel="stylesheet" crossorigin>`
-// 의 crossorigin 속성을 제거한다.
-//
-// Why: Tauri 2 Windows WebView2 의 커스텀 프로토콜(`http://tauri.localhost`)
-// 응답이 CORS 헤더를 흘리지 않으면 crossorigin 속성이 붙은 모듈 로드가
-// Chromium 정책으로 차단돼 React 마운트 자체가 0 이 되는 회귀 가능성.
-// macOS 의 `tauri://` 는 다른 핸들러 경로라 같은 build 가 정상이라
-// Windows 만 흰 화면이 되는 비대칭이 발생. 같은 origin 으로 서빙되는
-// asset 이라 crossorigin 자체가 불필요 — 제거가 가장 단순한 회피.
+// Vite 8 이 module script/link 에 붙이는 crossorigin 속성을 제거한다. file://
+// (Electron 프로덕션 로드)에서 crossorigin 모듈은 CORS 정책으로 차단될 수 있어
+// 같은 origin asset 엔 불필요 — 제거가 가장 단순한 회피.
 function stripCrossoriginPlugin(): Plugin {
   return {
     name: 'strip-crossorigin',
@@ -25,4 +19,29 @@ function stripCrossoriginPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), stripCrossoriginPlugin()],
+  // Electron 으로 마이그레이션: 프론트엔드는 그대로 두고 Tauri API import 만
+  // Electron IPC 기반 shim 으로 치환한다 (preload 가 노출한 window.__TP__ 사용).
+  resolve: {
+    alias: [
+      { find: '@tauri-apps/api/core', replacement: resolve(__dirname, 'src/tauri-shim/core.ts') },
+      { find: '@tauri-apps/api/event', replacement: resolve(__dirname, 'src/tauri-shim/event.ts') },
+      { find: '@tauri-apps/api/window', replacement: resolve(__dirname, 'src/tauri-shim/window.ts') },
+      { find: '@tauri-apps/plugin-store', replacement: resolve(__dirname, 'src/tauri-shim/plugin-store.ts') },
+      { find: '@tauri-apps/plugin-notification', replacement: resolve(__dirname, 'src/tauri-shim/plugin-notification.ts') },
+    ],
+  },
+  // file:// 로드(프로덕션) 시 절대경로(/assets/..)는 안 풀리므로 상대경로로.
+  base: './',
+  // 멀티페이지: 각 창이 자기 전용 HTML 진입점을 로드한다. 런타임 라벨 추측
+  // 없이 진입점 자체가 어떤 컴포넌트를 그릴지 결정 (App.tsx 상단 주석 참고).
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        settings: resolve(__dirname, 'settings.html'),
+        onboarding: resolve(__dirname, 'onboarding.html'),
+        preview: resolve(__dirname, 'preview.html'),
+      },
+    },
+  },
 })

@@ -154,65 +154,16 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
   await emit("config-changed");
 }
 
-// Three windows share this bundle: the pinned pet panel ("main"), the
-// settings popup ("settings"), and the first-run onboarding popup
-// ("onboarding").
+// 각 창은 자기 전용 HTML 진입점을 로드한다 (멀티페이지):
+//   index.html      → main.tsx          → <PetApp/>      (펫 패널, 라벨 "main")
+//   settings.html   → settings-main.tsx → <SettingsApp/> (라벨 "settings")
+//   onboarding.html → onboarding-main.tsx→ <OnboardingApp/> (라벨 "onboarding")
+//   preview.html    → preview-main.tsx  → <AnimPreviewApp/> (개발용 애니 프리뷰)
 //
-// v1.74.3: URL 의존을 통째로 폐기하고 Tauri 윈도우 라벨로 라우팅.
-// v1.74.1/.2 시도에서 (a) `?view=...` query string 과 (b) `#view=...`
-// hash 둘 다 Windows WebView2 경로에서 떨궈져 `location.search` /
-// `location.hash` 가 모두 빈 문자열이 되는 회귀 확정 (사용자 v1.74.2
-// 검증 결과 같은 PetApp 잔재 + shadow + handle 만 보임). Tauri 의
-// `WebviewWindowBuilder::new(&app, "<label>", url)` 두 번째 인자로 박힌
-// 윈도우 라벨은 URL 인코딩 영향 0 이고 양 OS / dev / release 일관 동작.
-// URL 라우팅은 dev 모드(vite localhost 직접 접근)와 preview 진입을 위한
-// 폴백으로만 유지.
-function viewFromTauri(): "settings" | "onboarding" | "preview" | null {
-  // v1.74.6: Rust 측 `initialization_script` 가 navigation 전에 박는
-  // sentinel 글로벌을 최우선 확인. `getCurrentWindow().label` 은 Windows
-  // WebView2 에서 `__TAURI_INTERNALS__` 주입 레이스로 빈 값/예외가 나는
-  // 회귀가 v1.74.5 에서 확인됨 → 시작하기 창에 PetApp 이 렌더됨. sentinel
-  // 은 그 레이스를 우회한다.
-  const injected = (window as unknown as { __TAURI_VIEW_LABEL__?: string })
-    .__TAURI_VIEW_LABEL__;
-  if (injected === "settings") return "settings";
-  if (injected === "onboarding") return "onboarding";
-  if (injected === "preview") return "preview";
-  if (injected === "main") return null;
-
-  // Tauri 컨텍스트에서 윈도우 라벨로 2차 라우팅. Tauri 미주입 환경(예:
-  // vite dev 서버를 브라우저로 직접 띄운 케이스) 에선 throw 또는 빈 라벨
-  // 가능성이 있어 try/catch 후 URL 폴백.
-  try {
-    const label = getCurrentWindow().label;
-    if (label === "settings") return "settings";
-    if (label === "onboarding") return "onboarding";
-    if (label === "preview") return "preview";
-    // main 또는 알 수 없는 라벨이면 PetApp 으로 떨어지도록 null.
-    if (label === "main") return null;
-  } catch {
-    // Non-Tauri 컨텍스트. URL 폴백으로 진행.
-  }
-  // URL 폴백: hash 우선 (브라우저 직접 접근 시), query string 도 같이.
-  const hashRaw = window.location.hash.startsWith("#")
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const hashView = new URLSearchParams(hashRaw).get("view");
-  const queryView = new URLSearchParams(window.location.search).get("view");
-  const v = hashView ?? queryView;
-  if (v === "settings") return "settings";
-  if (v === "onboarding") return "onboarding";
-  if (v === "preview") return "preview";
-  return null;
-}
-
-export default function App() {
-  const v = viewFromTauri();
-  if (v === "settings") return <SettingsApp />;
-  if (v === "onboarding") return <OnboardingApp />;
-  if (v === "preview") return <AnimPreviewApp />;
-  return <PetApp />;
-}
+// 과거엔 세 창이 같은 index.html 하나를 로드하고 런타임에 `__TAURI_VIEW_LABEL__`/
+// 윈도우 라벨/URL hash 로 자기가 누구인지 추측해 컴포넌트를 골랐는데, WebView2 에서
+// 그 추측이 주입 레이스·URL 인코딩으로 반복적으로 깨져 v1.74.x 내내 회귀가 났다.
+// 진입점을 분리하면 추측 자체가 사라져 양 OS / dev / release 에서 결정적으로 동작한다.
 
 const PREVIEW_ACTIONS: Exclude<IdleAction, "none">[] = [
   "roll",
@@ -237,7 +188,7 @@ const PREVIEW_FLASHES: Array<{ kind: "hit" | "miss"; label: string }> = [
   { kind: "miss", label: "flash-miss · 비 (우는 톤)" },
 ];
 
-function AnimPreviewApp() {
+export function AnimPreviewApp() {
   const skin = findSkin(DEFAULT_SKIN_ID);
   const stillSrc = skin.frames.good;
   const [state] = useState<"full" | "high" | "good" | "mid" | "low" | "tired" | "sleepy">("good");
@@ -316,7 +267,7 @@ function AnimPreviewApp() {
   );
 }
 
-function PetApp() {
+export function PetApp() {
   // store IPC(plugin-store load)가 Windows WebView2에서 끝내 응답하지 않아도
   // 펫이 무조건 보이도록 기본 설정으로 즉시 렌더하고, store가 resolve되면 실제
   // 설정으로 갱신한다. 옛 구조는 loading 게이트로 null을 그리다 store hang 시
@@ -516,7 +467,7 @@ function PetApp() {
 // pinning, no level juggling — text inputs work normally. It loads the
 // shared config store, lets the user edit, and broadcasts
 // `config-changed` so the pet window can re-read.
-function SettingsApp() {
+export function SettingsApp() {
   const [accounts, setAccounts] = useState<AccountsConfig | null>(null);
   const [snap, setSnap] = useState<UsageSnapshot | null>(null);
 
@@ -587,7 +538,7 @@ function SettingsApp() {
 // two real choices the app needs: a character and the claude.ai
 // session credentials. There's no plan selection anymore — quota %
 // comes straight from claude.ai's API once the user pastes a cookie.
-function OnboardingApp() {
+export function OnboardingApp() {
   const [skin, setSkin] = useState<string>(DEFAULT_SKIN_ID);
   const [label, setLabel] = useState("메인 계정");
   const [orgId, setOrgId] = useState("");

@@ -4,49 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>claude-desk-pet</title>
+    <title>토큰 판다</title>
   </head>
   <body>
     <div id="root"></div>
-    <!-- 펫 윈도우(라벨 "main")일 때 html/body/#root가 마우스 hit-test를
-         받지 않도록 main.tsx 마운트 직전에 강제. CSS :has() 동적 평가 의존
-         없이 가장 빠른 시점에 박는다. settings/onboarding/preview 윈도우는
-         이 분기 밖이라 평소처럼 클릭 받음.
-         v1.74.3: URL 의존(query/hash 둘 다) 을 Windows WebView2 가 떨궈서
-         Tauri 의 내부 글로벌 (__TAURI_INTERNALS__.metadata.currentWindow.label)
-         로 직접 라벨 조회.
-         v1.74.6: Windows WebView2 에서 인라인 script가 `__TAURI_INTERNALS__`
-         주입보다 먼저 실행되는 레이스 확인 → label null → URL 폴백 →
-         hash 도 떨궈져 isPet=true → 시작하기/설정 창까지 pointer-events:none
-         박혀 검정/빈 화면 회귀. Rust 측에서 initialization_script 로
-         `__TAURI_VIEW_LABEL__` 글로벌을 박아 1순위 sentinel 로 사용. -->
-    <script>
-      (function () {
-        var injected = window.__TAURI_VIEW_LABEL__ || null;
-        var label = injected;
-        if (!label) {
-          try {
-            var m = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata;
-            label = (m && m.currentWindow && m.currentWindow.label) || null;
-          } catch (e) {}
-        }
-        var isPet;
-        if (label !== null) {
-          isPet = label === "main";
-        } else {
-          var raw = location.hash.charAt(0) === "#" ? location.hash.slice(1) : location.hash;
-          var hashView = new URLSearchParams(raw).get("view");
-          var queryView = new URLSearchParams(location.search).get("view");
-          isPet = !hashView && !queryView;
-        }
-        if (isPet) {
-          document.documentElement.style.pointerEvents = "none";
-          document.body.style.pointerEvents = "none";
-          var r = document.getElementById("root");
-          if (r) r.style.pointerEvents = "none";
-        }
-      })();
-    </script>
+    <!-- 펫 패널(라벨 "main") 전용 진입점. 드래그/투명 처리는 pet-drag.css 가
+         -webkit-app-region 으로 담당한다. settings/onboarding/preview 는 각자
+         자기 HTML 진입점을 쓰므로 이 페이지와 무관하다. -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
