@@ -248,10 +248,26 @@ function startUpdateChecker() {
   }, 60 * 60 * 1000);
 }
 
+function formatUpdateCheckLabel() {
+  if (!lastUpdateCheck) return "업데이트 확인 대기 중…";
+  const d = lastUpdateCheck.at;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (lastUpdateCheck.ok) {
+    return updateInfo
+      ? `🆕 v${updateInfo.latest_version} 있음 · ${hh}:${mm} 확인`
+      : `최신 · ${hh}:${mm} 확인`;
+  }
+  return `확인 실패 · ${hh}:${mm} 시도`;
+}
+
 function rebuildTray() {
   if (!tray) return;
   const template = [
     { label: `토큰 판다 v${APP_VERSION}`, enabled: false },
+    // 폴링 상태/시각 인라인 표시 — "지금 새로고침"이 실제로 동작했는지 사용자
+    // 가 시각으로 구분할 수 있게 (v1.72 회귀).
+    { label: formatUpdateCheckLabel(), enabled: false },
   ];
   // 새 버전이 감지되면 버전 라벨 바로 아래에 "🆕 v.. 설치" — 클릭 시 브라우저로
   // Releases 페이지를 연다 (Electron MVP — 자동 dmg 다운로드/설치는 후속).
