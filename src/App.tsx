@@ -158,10 +158,24 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
 
 // Three windows share this bundle: the pinned pet panel ("main"), the
 // settings popup ("settings"), and the first-run onboarding popup
-// ("onboarding"). The non-main ones are launched with ?view=<name> so
-// we branch at the top of the React tree.
+// ("onboarding"). The non-main ones are launched with #view=<name>.
+//
+// v1.75: query string(`?view=...`) 에서 hash(`#view=...`) 로 전환.
+// Tauri 2 의 `WebviewUrl::App` 가 Windows WebView2 경로에서 query 를
+// 보존하지 못해(`location.search` 빈 문자열) 모든 spawned 창이 디폴트
+// 분기인 `<PetApp />` 으로 렌더되던 회귀 (v1.74 Phase 1 Windows 빌드).
+// Hash 는 URL 파싱·percent-encode 영향이 없어 양 OS 안전.
+//
+// `?view=preview` 같은 dev 진입 경로도 hash 로 호출하도록 같이 옮김
+// (`vite dev` 에서도 `/#view=preview`). preview 는 사용자가 직접 URL 을
+// 친 적이 거의 없는 dev 전용이라 호환성 부담 낮음.
 function viewFromUrl(): "settings" | "onboarding" | "preview" | null {
-  const v = new URLSearchParams(window.location.search).get("view");
+  // hash 는 `#view=foo` 또는 `#view=foo&extra=bar` 형태. URLSearchParams 가
+  // `?` 없이 그대로 받지는 못해서 leading `#` 한 글자만 떼고 넘김.
+  const raw = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const v = new URLSearchParams(raw).get("view");
   if (v === "settings") return "settings";
   if (v === "onboarding") return "onboarding";
   if (v === "preview") return "preview";

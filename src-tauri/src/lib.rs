@@ -718,7 +718,15 @@ fn open_settings_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let url = WebviewUrl::App("index.html?view=settings".into());
+    // v1.75: query string (`?view=settings`) 대신 hash(`#view=settings`)로
+    // 라우팅. Tauri 2 의 `WebviewUrl::App(PathBuf)` 는 path-like 문자열을
+    // platform 별 자산 프로토콜 URL 로 변환하는데, Windows WebView2 경로에서
+    // `?` 가 URL-encode 되거나 navigation 단계에서 query 가 떨어져
+    // `location.search` 가 비는 회귀가 v1.74 Phase 1 빌드에서 확인됨
+    // (사용자 스크린샷: 온보딩 창 제목만 뜨고 안엔 PetApp 의 리사이즈 핸들 +
+    // 그림자만 보임 → `viewFromUrl()` 이 null 반환 → 디폴트 분기로 PetApp 렌더).
+    // Hash 는 URL 파싱·percent-encode 영향 없이 fragment 로 보존돼 양 OS 동일하게 동작.
+    let url = WebviewUrl::App("index.html#view=settings".into());
     // Bumped from 440×620 to 600×680 — at the narrower size the
     // "API 연동" link and the "🔔 어떻게 연결되나요?" chip wrapped onto
     // two lines and clipped the cookie-flow diagram inside the help
@@ -732,7 +740,11 @@ fn open_settings_window(app: AppHandle) -> Result<(), String> {
         .transparent(false)
         .always_on_top(false)
         .skip_taskbar(false)
-        .visible(true);
+        .visible(true)
+        // v1.75: Cargo `devtools` feature 만으로는 WebView2 우클릭 inspector
+        // 가 안 켜진다. builder 에 명시적으로 활성. F12 단축키 + 우클릭 →
+        // Inspect 둘 다 동작. release 빌드에서도 디버깅 동선 유지.
+        .devtools(true);
 
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_focus();
@@ -754,7 +766,8 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let url = WebviewUrl::App("index.html?view=onboarding".into());
+    // v1.75: hash 라우팅 + devtools 명시. 사유는 open_settings_window 참고.
+    let url = WebviewUrl::App("index.html#view=onboarding".into());
     let builder = WebviewWindowBuilder::new(&app, "onboarding", url)
         .title("토큰 판다 — 시작하기")
         .inner_size(640.0, 760.0)
@@ -765,7 +778,8 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
         .always_on_top(false)
         .skip_taskbar(false)
         .center()
-        .visible(true);
+        .visible(true)
+        .devtools(true);
 
     let window = builder.build().map_err(|e| e.to_string())?;
     let _ = window.set_focus();

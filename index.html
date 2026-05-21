@@ -11,10 +11,14 @@
     <!-- 펫 윈도우(view 파라미터 없음)일 때 html/body/#root가 마우스 hit-test를
          받지 않도록 main.tsx 마운트 직전에 강제. CSS :has() 동적 평가 의존
          없이 가장 빠른 시점에 박는다. settings/onboarding/preview 윈도우는
-         이 분기 밖이라 평소처럼 클릭 받음. -->
+         이 분기 밖이라 평소처럼 클릭 받음.
+         v1.75: query string(`?view=...`) → hash(`#view=...`) 라우팅 전환.
+         Tauri 2 Windows WebView2 가 query 를 보존하지 못해 모든 spawned
+         창이 PetApp 으로 렌더되던 회귀 회피. -->
     <script>
       (function () {
-        var v = new URLSearchParams(location.search).get("view");
+        var raw = location.hash.charAt(0) === "#" ? location.hash.slice(1) : location.hash;
+        var v = new URLSearchParams(raw).get("view");
         if (!v) {
           document.documentElement.style.pointerEvents = "none";
           document.body.style.pointerEvents = "none";
