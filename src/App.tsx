@@ -158,24 +158,38 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
 
 // Three windows share this bundle: the pinned pet panel ("main"), the
 // settings popup ("settings"), and the first-run onboarding popup
-// ("onboarding"). The non-main ones are launched with #view=<name>.
+// ("onboarding").
 //
-// v1.75: query string(`?view=...`) 에서 hash(`#view=...`) 로 전환.
-// Tauri 2 의 `WebviewUrl::App` 가 Windows WebView2 경로에서 query 를
-// 보존하지 못해(`location.search` 빈 문자열) 모든 spawned 창이 디폴트
-// 분기인 `<PetApp />` 으로 렌더되던 회귀 (v1.74 Phase 1 Windows 빌드).
-// Hash 는 URL 파싱·percent-encode 영향이 없어 양 OS 안전.
-//
-// `?view=preview` 같은 dev 진입 경로도 hash 로 호출하도록 같이 옮김
-// (`vite dev` 에서도 `/#view=preview`). preview 는 사용자가 직접 URL 을
-// 친 적이 거의 없는 dev 전용이라 호환성 부담 낮음.
-function viewFromUrl(): "settings" | "onboarding" | "preview" | null {
-  // hash 는 `#view=foo` 또는 `#view=foo&extra=bar` 형태. URLSearchParams 가
-  // `?` 없이 그대로 받지는 못해서 leading `#` 한 글자만 떼고 넘김.
-  const raw = window.location.hash.startsWith("#")
+// v1.74.3: URL 의존을 통째로 폐기하고 Tauri 윈도우 라벨로 라우팅.
+// v1.74.1/.2 시도에서 (a) `?view=...` query string 과 (b) `#view=...`
+// hash 둘 다 Windows WebView2 경로에서 떨궈져 `location.search` /
+// `location.hash` 가 모두 빈 문자열이 되는 회귀 확정 (사용자 v1.74.2
+// 검증 결과 같은 PetApp 잔재 + shadow + handle 만 보임). Tauri 의
+// `WebviewWindowBuilder::new(&app, "<label>", url)` 두 번째 인자로 박힌
+// 윈도우 라벨은 URL 인코딩 영향 0 이고 양 OS / dev / release 일관 동작.
+// URL 라우팅은 dev 모드(vite localhost 직접 접근)와 preview 진입을 위한
+// 폴백으로만 유지.
+function viewFromTauri(): "settings" | "onboarding" | "preview" | null {
+  // Tauri 컨텍스트에서 윈도우 라벨로 1차 라우팅. Tauri 미주입 환경(예:
+  // vite dev 서버를 브라우저로 직접 띄운 케이스) 에선 throw 또는 빈 라벨
+  // 가능성이 있어 try/catch 후 URL 폴백.
+  try {
+    const label = getCurrentWindow().label;
+    if (label === "settings") return "settings";
+    if (label === "onboarding") return "onboarding";
+    if (label === "preview") return "preview";
+    // main 또는 알 수 없는 라벨이면 PetApp 으로 떨어지도록 null.
+    if (label === "main") return null;
+  } catch {
+    // Non-Tauri 컨텍스트. URL 폴백으로 진행.
+  }
+  // URL 폴백: hash 우선 (브라우저 직접 접근 시), query string 도 같이.
+  const hashRaw = window.location.hash.startsWith("#")
     ? window.location.hash.slice(1)
     : window.location.hash;
-  const v = new URLSearchParams(raw).get("view");
+  const hashView = new URLSearchParams(hashRaw).get("view");
+  const queryView = new URLSearchParams(window.location.search).get("view");
+  const v = hashView ?? queryView;
   if (v === "settings") return "settings";
   if (v === "onboarding") return "onboarding";
   if (v === "preview") return "preview";
@@ -183,7 +197,7 @@ function viewFromUrl(): "settings" | "onboarding" | "preview" | null {
 }
 
 export default function App() {
-  const v = viewFromUrl();
+  const v = viewFromTauri();
   if (v === "settings") return <SettingsApp />;
   if (v === "onboarding") return <OnboardingApp />;
   if (v === "preview") return <AnimPreviewApp />;
