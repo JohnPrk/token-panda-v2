@@ -41,6 +41,16 @@ let latest = null; // ApiUsage
 let lastError = null;
 let pollTimer = null;
 
+// 401/403/404 첫 발생 시 1회만 설정창을 띄우는 latch. 다음 성공 시 풀려서
+// 재만료 사이클에 다시 한 번만 동작. 없으면 폴러가 30초마다 설정창을 다시
+// 띄워서 사용자가 작업을 못함.
+let authPopupShown = false;
+
+function isAuthFailure(msg) {
+  if (!msg) return false;
+  return msg.indexOf("HTTP 401") >= 0 || msg.indexOf("HTTP 403") >= 0 || msg.indexOf("HTTP 404") >= 0;
+}
+
 function pageUrl(page) {
   if (DEV_URL) {
     const base = DEV_URL.endsWith("/") ? DEV_URL : DEV_URL + "/";
@@ -170,8 +180,13 @@ async function pollOnce() {
   try {
     latest = await claudeApi.fetchUsage(apiConfig.orgId, apiConfig.cookie);
     lastError = null;
+    authPopupShown = false; // 다음 만료 사이클에서 다시 한 번 띄우게 reset
   } catch (err) {
     lastError = err && err.message ? err.message : String(err);
+    if (isAuthFailure(lastError) && !authPopupShown) {
+      authPopupShown = true;
+      openSettings();
+    }
   }
   broadcast("usage-update", buildSnapshot());
 }
