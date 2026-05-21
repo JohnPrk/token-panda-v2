@@ -1,7 +1,7 @@
 {
   "name": "claude-desk-pet",
   "private": true,
-  "version": "1.74.8",
+  "version": "1.75.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
