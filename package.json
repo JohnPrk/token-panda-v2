@@ -1,7 +1,7 @@
 {
   "name": "token-panda",
   "private": true,
-  "version": "1.85.0",
+  "version": "1.95.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -20,6 +20,7 @@
     "dist": "npm run build && electron-builder -mw"
   },
   "dependencies": {
+    "koffi": "^3.0.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },

@@ -11,6 +11,7 @@ const claudeApi = require("./claudeApi.cjs");
 const createStore = require("./store.cjs");
 const updater = require("./updater.cjs");
 const installer = require("./installer.cjs");
+const spaces = require("./spaces.cjs");
 const { isAuthFailure, formatUpdateCheckLabel } = require("./helpers.cjs");
 
 app.setName("token-panda");
@@ -98,6 +99,17 @@ function createPetWindow() {
     webPreferences: webPrefs("main"),
   });
   petWin.setAlwaysOnTop(true, "screen-saver");
+  // 모든 Space + 스와이프 전환에도 화면 고정(Stationary) 으로 — 메뉴바처럼 데스크탑을
+  // 넘겨도 펫의 x,y 가 안 밀리는 "한 겹 위 레이어" 느낌. Electron 내장
+  // setVisibleOnAllWorkspaces 는 CanJoinAllSpaces 만 켜서 전환 때 같이 밀리므로,
+  // spaces.cjs 가 koffi FFI 로 NSWindow.collectionBehavior 에 Stationary 까지 박는다.
+  // 펫 윈도우에만 적용 — 설정/온보딩 창은 일반 BrowserWindow 라 포커스 회귀와 무관.
+  // sticky 태그는 NSWindow.windowNumber 가 유효(창이 화면에 올라온 뒤)해야 박힌다.
+  // 생성 직후엔 0 일 수 있어 lifecycle 시점마다 재시도한다.
+  spaces.pinPetToAllSpaces(petWin);
+  petWin.once("ready-to-show", () => spaces.pinPetToAllSpaces(petWin));
+  petWin.once("show", () => spaces.pinPetToAllSpaces(petWin));
+  setTimeout(() => spaces.pinPetToAllSpaces(petWin), 800);
   petWin.loadURL(pageUrl("index.html"));
   petWin.on("closed", () => {
     petWin = null;
