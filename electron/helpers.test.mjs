@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 import helpers from "./helpers.cjs";
-const { isAuthFailure, formatUpdateCheckLabel } = helpers;
+const { isAuthFailure, formatUpdateCheckLabel, bambooTierForRemaining } = helpers;
 
 describe("isAuthFailure", () => {
   it("matches HTTP 401 anywhere in message", () => {
@@ -73,5 +73,24 @@ describe("formatUpdateCheckLabel", () => {
   it("pads hours and minutes to two digits", () => {
     const at = new Date(2026, 0, 1, 3, 7, 0);
     expect(formatUpdateCheckLabel({ at, ok: true }, null)).toBe("최신 · 03:07 확인");
+  });
+});
+
+describe("bambooTierForRemaining", () => {
+  it("maps remaining fraction to bamboo tier (75%+ / 50%+ / 25%+ / <25%)", () => {
+    expect(bambooTierForRemaining(1)).toBe("100");
+    expect(bambooTierForRemaining(0.75)).toBe("100");
+    expect(bambooTierForRemaining(0.74)).toBe("75");
+    expect(bambooTierForRemaining(0.5)).toBe("75");
+    expect(bambooTierForRemaining(0.49)).toBe("50");
+    expect(bambooTierForRemaining(0.25)).toBe("50");
+    expect(bambooTierForRemaining(0.24)).toBe("25");
+    expect(bambooTierForRemaining(0)).toBe("25");
+  });
+
+  it("treats invalid input as empty (25)", () => {
+    expect(bambooTierForRemaining(NaN)).toBe("25");
+    expect(bambooTierForRemaining(undefined)).toBe("25");
+    expect(bambooTierForRemaining(-0.5)).toBe("25");
   });
 });

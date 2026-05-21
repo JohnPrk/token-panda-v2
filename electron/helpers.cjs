@@ -28,4 +28,15 @@ function formatUpdateCheckLabel(lastUpdateCheck, updateInfo) {
   return `확인 실패 · ${hh}:${mm} 시도`;
 }
 
-module.exports = { isAuthFailure, formatUpdateCheckLabel };
+// 5h 잔량(0-1) → 대나무 트레이 아이콘 tier suffix (build/tray/tray-<tier>.png).
+// 잔량이 많을수록 줄기 많은 아이콘. README: 75%+ 4줄기 / 50%+ 3줄기 / 25%+ 2줄기 /
+// 25% 미만 1줄기. 비정상 입력(NaN 등)은 가장 비어있는 25 로.
+function bambooTierForRemaining(remaining) {
+  const r = typeof remaining === "number" && Number.isFinite(remaining) ? remaining : 0;
+  if (r >= 0.75) return "100";
+  if (r >= 0.5) return "75";
+  if (r >= 0.25) return "50";
+  return "25";
+}
+
+module.exports = { isAuthFailure, formatUpdateCheckLabel, bambooTierForRemaining };

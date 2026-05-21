@@ -12,7 +12,7 @@ const createStore = require("./store.cjs");
 const updater = require("./updater.cjs");
 const installer = require("./installer.cjs");
 const spaces = require("./spaces.cjs");
-const { isAuthFailure, formatUpdateCheckLabel } = require("./helpers.cjs");
+const { isAuthFailure, formatUpdateCheckLabel, bambooTierForRemaining } = require("./helpers.cjs");
 
 app.setName("token-panda");
 
@@ -43,6 +43,7 @@ let quitting = false;
 let trayMode = "fivehour";
 let trayAccounts = [];
 let trayActiveId = null;
+let lastRemaining = 1; // 마지막 5h 잔량(0-1). 트레이 아이콘 tier 갱신용
 
 let apiConfig = null; // { orgId, cookie, platformOrgId, platformCookie }
 let latest = null; // ApiUsage
@@ -295,14 +296,13 @@ function rebuildTray() {
   if (!tray) return;
   const template = [
     { label: `토큰 판다 v${APP_VERSION}`, enabled: false },
-    // 폴링 상태/시각 인라인 표시 — "지금 새로고침"이 실제로 동작했는지 사용자
-    // 가 시각으로 구분할 수 있게 (v1.72 회귀).
-    { label: formatUpdateCheckLabel(lastUpdateCheck, updateInfo), enabled: false },
   ];
-  // 새 버전이 감지되면 버전 라벨 바로 아래에 "🆕 v.. 설치" — 클릭 시 백그
-  // 라운드 자동 설치 흐름 (다운로드 → 옛 프로세스 종료 → 사일런트 설치 →
-  // 새 앱 실행). 설치 가능한 asset 이 없으면 Releases 페이지로 fallback.
+  // 업데이트 폴링 상태/시각 라인은 *새 버전이 감지된 경우* 에만 노출 (v1.97).
+  // 최신/실패/대기 상태는 메뉴를 어지럽힐 뿐이라 숨김. updateInfo 가 있을 때
+  // formatUpdateCheckLabel 은 "🆕 v.. 있음 · HH:MM 확인" 형태라 바로 아래의
+  // "🆕 v.. 설치" 버튼과 짝을 이룬다.
   if (updateInfo) {
+    template.push({ label: formatUpdateCheckLabel(lastUpdateCheck, updateInfo), enabled: false });
     template.push({
       label: installInProgress
         ? `🆕 v${updateInfo.latest_version} 설치 중…`
@@ -365,12 +365,39 @@ function rebuildTray() {
   tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
+// tier PNG 는 원본 컬러(녹색 잎/갈색 줄기) 그대로 노출. setTemplateImage 를
+// 걸면 알파만 남고 흑백 실루엣이 되어 사용자 의도("원래대로")와 어긋남.
+function trayImage(p) {
+  return nativeImage.createFromPath(p);
+}
+
+// 기본 트레이 아이콘(build/tray.png, 없으면 앱 아이콘). 5h 모드 외에선
+// 트레이 아이콘을 비우니 startup 시 createTray 초기값으로만 잠깐 쓰인다.
+function defaultTrayImage() {
+  const img = trayImage(TRAY_ICON);
+  return img.isEmpty() ? trayImage(ICON) : img;
+}
+
+// 5h 모드일 때만 잔량별 컬러 대나무(build/tray/tray-<tier>.png, 4→1 줄기) 노출.
+// 그 외(5h+주간, 5h+주간+$) 모드에선 사용자 요청대로 아이콘 자체를 빼고
+// 텍스트 라벨만 메뉴바에 남김 (nativeImage.createEmpty()).
+function applyTrayIcon() {
+  if (!tray) return;
+  if (trayMode === "fivehour") {
+    const tier = bambooTierForRemaining(lastRemaining);
+    const img = trayImage(path.join(RESOURCE_ROOT, "build", "tray", `tray-${tier}.png`));
+    tray.setImage(img.isEmpty() ? defaultTrayImage() : img);
+  } else {
+    tray.setImage(nativeImage.createEmpty());
+  }
+}
+
 function createTray() {
-  let img = nativeImage.createFromPath(TRAY_ICON);
-  if (img.isEmpty()) img = nativeImage.createFromPath(ICON);
-  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
+  const init = defaultTrayImage();
+  tray = new Tray(init.isEmpty() ? nativeImage.createEmpty() : init);
   tray.setToolTip("토큰 판다");
   tray.on("click", () => tray.popUpContextMenu());
+  applyTrayIcon();
   rebuildTray();
 }
 
@@ -429,10 +456,22 @@ async function handleCommand(cmd, a) {
       return null;
     case "auto_extract_from_cookie":
       return await claudeApi.autoExtract(a.rawCookie);
-    case "set_tray_title":
-      if (tray) tray.setToolTip(`토큰 판다  ${a.title || ""}`.trim());
+    case "set_tray_title": {
+      // 프론트가 formatTrayLabel 로 계산한 5h%/주간%/$ 라벨. macOS 는 setTitle 로
+      // 메뉴바 아이콘 옆에 *상시* 표시(옛 Tauri 동작). setToolTip 만 쓰면 hover 시에만
+      // 보여서 라이브 표시가 안 된다. setTitle 은 macOS 전용이라 가드.
+      const t = a.title ? String(a.title).trim() : "";
+      if (tray) {
+        if (process.platform === "darwin") tray.setTitle(t);
+        tray.setToolTip(`토큰 판다  ${t}`.trim());
+      }
       return null;
+    }
     case "set_tray_icon_for_remaining":
+      if (typeof a.remaining === "number" && Number.isFinite(a.remaining)) {
+        lastRemaining = a.remaining;
+      }
+      applyTrayIcon();
       return null;
     case "set_active_skin":
       return null;
@@ -443,6 +482,7 @@ async function handleCommand(cmd, a) {
       return null;
     case "update_tray_mode":
       trayMode = a.mode || "fivehour";
+      applyTrayIcon();
       rebuildTray();
       return null;
     case "resize_pet_window":
