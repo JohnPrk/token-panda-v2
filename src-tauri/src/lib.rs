@@ -404,34 +404,41 @@ struct TestApiResult {
 }
 
 #[tauri::command]
-fn test_api_config(
+async fn test_api_config(
     org_id: String,
     cookie: String,
     platform_org_id: Option<String>,
     platform_cookie: Option<String>,
 ) -> Result<TestApiResult, String> {
-    let usage = claude_api::fetch_usage(&org_id, &cookie)?;
-    let platform_org = platform_org_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let platform_ck = platform_cookie
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(cookie.as_str());
-    let (prepaid_dollars, prepaid_error) = match platform_org {
-        Some(platform) => match claude_api::fetch_prepaid_credits(platform, platform_ck) {
-            Ok(d) => (Some(d), None),
-            Err(e) => (None, Some(e)),
-        },
-        None => (None, None),
-    };
-    Ok(TestApiResult {
-        usage,
-        prepaid_dollars,
-        prepaid_error,
+    // 블로킹 HTTP를 메인 스레드에서 돌리면 Windows WebView2 이벤트 루프(메시지
+    // 펌프)가 얼어 앱이 응답 불능이 되고 창/프로세스를 못 닫는다. spawn_blocking
+    // 으로 블로킹 풀에서 실행 (refresh_usage 의 백그라운드 스레드 패턴과 동일 의도).
+    tauri::async_runtime::spawn_blocking(move || -> Result<TestApiResult, String> {
+        let usage = claude_api::fetch_usage(&org_id, &cookie)?;
+        let platform_org = platform_org_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let platform_ck = platform_cookie
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(cookie.as_str());
+        let (prepaid_dollars, prepaid_error) = match platform_org {
+            Some(platform) => match claude_api::fetch_prepaid_credits(platform, platform_ck) {
+                Ok(d) => (Some(d), None),
+                Err(e) => (None, Some(e)),
+            },
+            None => (None, None),
+        };
+        Ok(TestApiResult {
+            usage,
+            prepaid_dollars,
+            prepaid_error,
+        })
     })
+    .await
+    .map_err(|e| format!("연결 테스트 작업 실행 실패: {}", e))?
 }
 
 /// While Settings is open, drop the panel from
@@ -794,28 +801,34 @@ fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
 /// 발송 + 그 링크가 시스템 기본 브라우저에서 열리기 때문에 본질적으로 작동
 /// 안 함이 확인돼 폐기. 시스템 브라우저 + paste 방식으로 전환.
 #[tauri::command]
-fn open_claude_usage_in_browser() -> Result<(), String> {
-    let url = "https://claude.ai/settings/usage";
+async fn open_claude_usage_in_browser() -> Result<(), String> {
+    // 외부 프로세스 spawn + status() 대기도 메인 스레드에서 하면 Windows에서
+    // 셸이 늦게 반환할 때 이벤트 루프가 멈춘다. spawn_blocking 으로 분리.
+    tauri::async_runtime::spawn_blocking(|| -> Result<(), String> {
+        let url = "https://claude.ai/settings/usage";
 
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(url).status();
+        #[cfg(target_os = "macos")]
+        let result = std::process::Command::new("open").arg(url).status();
 
-    // Windows에서 URL은 `cmd /C start "" "<url>"` 형태로 띄운다. `start`는
-    // cmd 빌트인이라 PATH에 없고, 첫 따옴표 인자는 윈도우 제목 자리이므로
-    // 비워두지 않으면 URL이 제목으로 해석돼 브라우저가 안 뜨는 케이스가 있다.
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .status();
+        // Windows에서 URL은 `cmd /C start "" "<url>"` 형태로 띄운다. `start`는
+        // cmd 빌트인이라 PATH에 없고, 첫 따옴표 인자는 윈도우 제목 자리이므로
+        // 비워두지 않으면 URL이 제목으로 해석돼 브라우저가 안 뜨는 케이스가 있다.
+        #[cfg(target_os = "windows")]
+        let result = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status();
 
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    let result = std::process::Command::new("xdg-open").arg(url).status();
+        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+        let result = std::process::Command::new("xdg-open").arg(url).status();
 
-    let status = result.map_err(|e| format!("브라우저 열기 명령 실행 실패: {}", e))?;
-    if !status.success() {
-        return Err(format!("브라우저 열기 명령이 비정상 종료: {}", status));
-    }
-    Ok(())
+        let status = result.map_err(|e| format!("브라우저 열기 명령 실행 실패: {}", e))?;
+        if !status.success() {
+            return Err(format!("브라우저 열기 명령이 비정상 종료: {}", status));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("브라우저 열기 작업 실행 실패: {}", e))?
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -828,46 +841,53 @@ struct AutoExtractResult {
 /// 5종만 추리고, 그 쿠키로 /api/organizations 를 호출해 org_id 를 추출한다.
 /// 성공 시 정리된 cookie 헤더 + org_id 를 반환해 wizard 폼에 자동 채움.
 #[tauri::command]
-fn auto_extract_from_cookie(raw_cookie: String) -> Result<AutoExtractResult, String> {
-    let pairs = login_capture::parse_raw_cookie_header(&raw_cookie);
-    if !has_required_cookies(&pairs) {
-        return Err("sessionKey 쿠키가 보이지 않아요. claude.ai의 cookie 헤더 한 줄을 통째로 붙여넣어 주세요.".into());
-    }
-    let cookie_header = build_cookie_header(&pairs);
+async fn auto_extract_from_cookie(raw_cookie: String) -> Result<AutoExtractResult, String> {
+    // 블로킹 HTTP를 메인 스레드에서 돌리면 Windows WebView2 이벤트 루프가 얼어
+    // 온보딩 paste 단계에서 앱이 응답 불능(창/프로세스 못 닫음)이 된다.
+    // spawn_blocking 으로 블로킹 풀에서 실행.
+    tauri::async_runtime::spawn_blocking(move || -> Result<AutoExtractResult, String> {
+        let pairs = login_capture::parse_raw_cookie_header(&raw_cookie);
+        if !has_required_cookies(&pairs) {
+            return Err("sessionKey 쿠키가 보이지 않아요. claude.ai의 cookie 헤더 한 줄을 통째로 붙여넣어 주세요.".into());
+        }
+        let cookie_header = build_cookie_header(&pairs);
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("HTTP 클라이언트 생성 실패: {}", e))?;
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("HTTP 클라이언트 생성 실패: {}", e))?;
 
-    let resp = client
-        .get("https://claude.ai/api/organizations")
-        .header("Cookie", &cookie_header)
-        .header("Accept", "*/*")
-        .header("Referer", "https://claude.ai/")
-        .header("anthropic-client-platform", "web_claude_ai")
-        .header("anthropic-client-version", "1.0.0")
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
-             (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-        )
-        .send()
-        .map_err(|e| format!("/api/organizations 요청 실패: {}", e))?;
+        let resp = client
+            .get("https://claude.ai/api/organizations")
+            .header("Cookie", &cookie_header)
+            .header("Accept", "*/*")
+            .header("Referer", "https://claude.ai/")
+            .header("anthropic-client-platform", "web_claude_ai")
+            .header("anthropic-client-version", "1.0.0")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+            )
+            .send()
+            .map_err(|e| format!("/api/organizations 요청 실패: {}", e))?;
 
-    let status = resp.status();
-    let body = resp.text().unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("/api/organizations HTTP {}", status));
-    }
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("/api/organizations HTTP {}", status));
+        }
 
-    let org_id = extract_org_id_from_orgs_json(&body)
-        .ok_or_else(|| "organizations 응답에서 org_id를 추출하지 못했어요".to_string())?;
+        let org_id = extract_org_id_from_orgs_json(&body)
+            .ok_or_else(|| "organizations 응답에서 org_id를 추출하지 못했어요".to_string())?;
 
-    Ok(AutoExtractResult {
-        org_id,
-        cookie: cookie_header,
+        Ok(AutoExtractResult {
+            org_id,
+            cookie: cookie_header,
+        })
     })
+    .await
+    .map_err(|e| format!("쿠키 추출 작업 실행 실패: {}", e))?
 }
 
 #[tauri::command]

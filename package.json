@@ -1,7 +1,7 @@
 {
   "name": "claude-desk-pet",
   "private": true,
-  "version": "1.74.4",
+  "version": "1.74.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
