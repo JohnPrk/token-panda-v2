@@ -112,8 +112,6 @@ const REMAINING_THRESHOLDS: Array<[number, string]> = [
   [0.0, "0%"],
 ];
 
-type View = "loading" | "pet";
-
 // 계정 묶음(특히 활성 계정) 변경을 한 트랜잭션으로 처리하는 헬퍼.
 // 호출처: 트레이 메뉴, 설정 창의 계정 카드 클릭/추가/삭제.
 // 1) AccountsConfig 저장
@@ -307,8 +305,16 @@ function AnimPreviewApp() {
 }
 
 function PetApp() {
-  const [view, setView] = useState<View>("loading");
-  const [config, setConfig] = useState<PlanConfig | null>(null);
+  // store IPC(plugin-store load)가 Windows WebView2에서 끝내 응답하지 않아도
+  // 펫이 무조건 보이도록 기본 설정으로 즉시 렌더하고, store가 resolve되면 실제
+  // 설정으로 갱신한다. 옛 구조는 loading 게이트로 null을 그리다 store hang 시
+  // 영구 흰 화면이 됐고(메인 펫 윈도우는 라우팅과 무관하게 항상 PetApp), 그게
+  // v1.74.1~.3 라우팅 수정과 별개인 흰 화면의 본 원인이었다.
+  const [config, setConfig] = useState<PlanConfig>({
+    plan: "max5x",
+    limits: PLAN_PRESETS.max5x,
+    skin: DEFAULT_SKIN_ID,
+  });
   // v1.70 펫 zoom 배율. PlanConfig.petScale 로 영속화. 드래그 중에는 setScale 만
   // 호출해 즉시 시각 반영하고, pointerup 시점에 savePlanConfig 한 번 호출(드래그
   // 폭주 방지). disconnected 상태나 ResizeObserver 발화는 scale 변화의 자연
@@ -316,17 +322,37 @@ function PetApp() {
   const [scale, setScale] = useState<number>(PET_SCALE_DEFAULT);
 
   useEffect(() => {
-    Promise.all([loadPlanConfig(), loadAccountsConfig()]).then(
-      async ([planCfg, accCfg]) => {
+    let settled = false;
+
+    // 첫 설정 화면(온보딩) 안전망: loadPlanConfig/loadAccountsConfig가 Windows
+    // WebView2에서 끝내 응답하지 않아도, 2초 안에 init이 settle 안 되면 온보딩을
+    // 띄운다. 펫 본체는 기본 config로 이미 렌더돼 있으므로 여기선 온보딩만.
+    const guard = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      invoke("open_onboarding_window").catch(() => {});
+    }, 2000);
+
+    Promise.all([loadPlanConfig(), loadAccountsConfig()])
+      .then(([planCfg, accCfg]) => {
+        settled = true;
+        clearTimeout(guard);
+
         const active = accCfg.accounts.find(
           (a) => a.id === accCfg.activeAccountId,
         );
 
         // 활성 계정이 있으면 그 자격증명을 Rust로 푸시 + skin/트레이 메뉴 동기화.
         // 활성 캐릭터는 PlanConfig.skin과 항상 같아야 한다 (Pet 컴포넌트가
-        // config.skin을 그린다). 첫 부팅이거나 계정이 비었으면 기본 plan만
-        // 저장하고 온보딩 창을 띄운다.
+        // config.skin을 그린다). 첫 부팅이거나 계정이 비었으면 온보딩 창을 띄운다.
         if (active) {
+          const synced: PlanConfig = planCfg
+            ? { ...planCfg, skin: active.skinId }
+            : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
+          // 설정부터 반영 — 아래 invoke/save가 Windows에서 hang해도 펫은 이미 떠 있다.
+          setConfig(synced);
+          setScale(clampScale(synced.petScale ?? PET_SCALE_DEFAULT));
+
           invoke("set_api_config", {
             orgId: active.orgId,
             cookie: active.cookie,
@@ -335,53 +361,51 @@ function PetApp() {
           }).catch(() => {});
           invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
           invoke("update_tray_accounts", {
-            accounts: accCfg.accounts.map((a) => ({
-              id: a.id,
-              label: a.label,
-            })),
+            accounts: accCfg.accounts.map((a) => ({ id: a.id, label: a.label })),
             activeId: active.id,
           }).catch(() => {});
           invoke("update_tray_mode", {
             mode: planCfg?.trayMode ?? "fivehour",
           }).catch(() => {});
-
-          const synced: PlanConfig = planCfg
-            ? { ...planCfg, skin: active.skinId }
-            : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
           if (!planCfg || planCfg.skin !== active.skinId) {
-            await savePlanConfig(synced);
+            // await로 렌더를 막지 않도록 백그라운드 저장.
+            savePlanConfig(synced).catch(() => {});
           }
-          setConfig(synced);
-          setScale(clampScale(synced.petScale ?? PET_SCALE_DEFAULT));
-          setView("pet");
           return;
         }
 
-        // 계정이 비어 있는 첫 실행 (또는 전부 삭제된 상태). 펫은 기본 판다로
-        // 일단 띄우고, 온보딩에서 첫 계정을 만들도록 유도.
-        const defaultCfg: PlanConfig = planCfg ?? {
-          plan: "max5x",
-          limits: PLAN_PRESETS.max5x,
-          skin: DEFAULT_SKIN_ID,
-        };
-        if (!planCfg) {
-          await savePlanConfig(defaultCfg);
+        // 계정이 비어 있는 첫 실행(또는 전부 삭제). 펫은 이미 기본 판다로 떠
+        // 있으니, 저장된 plan이 있으면 반영하고 첫 계정을 만들도록 온보딩을 띄운다.
+        if (planCfg) {
+          setConfig(planCfg);
+          setScale(clampScale(planCfg.petScale ?? PET_SCALE_DEFAULT));
+        } else {
+          savePlanConfig({
+            plan: "max5x",
+            limits: PLAN_PRESETS.max5x,
+            skin: DEFAULT_SKIN_ID,
+          }).catch(() => {});
         }
-        // 메뉴는 빈 계정 목록 기준으로 한 번 정리
         invoke("update_tray_accounts", { accounts: [], activeId: null }).catch(
           () => {},
         );
-        invoke("update_tray_mode", { mode: defaultCfg.trayMode ?? "fivehour" }).catch(
-          () => {},
-        );
-        setConfig(defaultCfg);
-        setScale(clampScale(defaultCfg.petScale ?? PET_SCALE_DEFAULT));
-        setView("pet");
+        invoke("update_tray_mode", {
+          mode: planCfg?.trayMode ?? "fivehour",
+        }).catch(() => {});
         if (accCfg.accounts.length === 0) {
           invoke("open_onboarding_window").catch(() => {});
         }
-      },
-    );
+      })
+      .catch((e) => {
+        // store load 자체가 reject해도 펫은 이미 떠 있고, 첫 설정을 받도록 온보딩.
+        console.error("[pet] init failed:", e);
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        invoke("open_onboarding_window").catch(() => {});
+      });
+
+    return () => clearTimeout(guard);
   }, []);
 
   // 설정창 등 다른 윈도우가 PlanConfig 를 변경하면 petScale 도 다시 가져온다.
@@ -453,14 +477,12 @@ function PetApp() {
     };
   }, []);
 
-  if (view === "loading") return null;
-  // Onboarding lives in its own window now (open_onboarding_window).
-  // The pet panel always renders against `config` — even on first
-  // launch, where we save a default plan synchronously above before
-  // popping the onboarding window.
+  // Onboarding은 별도 윈도우(open_onboarding_window). 펫 패널은 항상 `config`로
+  // 렌더 — config가 기본값으로 초기화돼 있어 첫 paint가 store IPC를 기다리지
+  // 않는다(Windows에서 store가 hang해도 흰 화면이 안 됨).
   return (
     <Pet
-      config={config!}
+      config={config}
       scale={scale}
       onScaleChange={setScale}
       onScaleCommit={async (next) => {
@@ -487,15 +509,34 @@ function SettingsApp() {
   const [snap, setSnap] = useState<UsageSnapshot | null>(null);
 
   useEffect(() => {
+    let settled = false;
+    // PetApp과 같은 안전망: loadAccountsConfig가 Windows에서 hang/reject해도
+    // 설정 창이 흰 화면으로 멈추지 않도록, 2초 후 빈 계정 목록으로 렌더한다.
+    const guard = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      setAccounts((a) => a ?? { accounts: [], activeAccountId: null });
+    }, 2000);
     Promise.all([
       loadAccountsConfig(),
       invoke<UsageSnapshot>("get_usage_snapshot").catch(() => null),
-    ]).then(([acc, s]) => {
-      setAccounts(acc);
-      if (s) setSnap(s);
-    });
+    ])
+      .then(([acc, s]) => {
+        settled = true;
+        clearTimeout(guard);
+        setAccounts(acc);
+        if (s) setSnap(s);
+      })
+      .catch((e) => {
+        console.error("[settings] init failed:", e);
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        setAccounts({ accounts: [], activeAccountId: null });
+      });
     const un = listen<UsageSnapshot>("usage-update", (e) => setSnap(e.payload));
     return () => {
+      clearTimeout(guard);
       un.then((fn) => fn());
     };
   }, []);
