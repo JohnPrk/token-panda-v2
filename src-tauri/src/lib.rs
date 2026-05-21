@@ -1218,12 +1218,23 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     // update_checker가 1시간 주기로 업데이트 마커를 채워넣는다.
     let menu = build_menu(app, &[], None, None)?;
 
-    // 트레이 아이콘은 사용자 요청으로 제거. 메뉴바엔 텍스트 라벨(set_tray_title)만
-    // 표시된다. 아이콘 PNG 상수와 tray_icon_bytes 분기, set_tray_icon_for_remaining
-    // 호출은 호환성을 위해 남겨두되 본체는 no-op.
-    let _tray = TrayIconBuilder::with_id("main-tray")
+    // 트레이 아이콘은 v1.27 사용자 요청으로 macOS 에선 제거됐고, 메뉴바엔 텍스트
+    // 라벨(set_tray_title)만 표시된다. Windows 시스템 트레이는 그 메타포 자체가
+    // *아이콘 한 칸*이라 .icon() 없이는 NotifyIcon 이 안 뜨고 → 트레이 항목 자체가
+    // 사라지는 회귀(v1.47 빌드 v1.74 까지 Windows 에서 트레이가 보이지 않았던 원인).
+    // 그래서 windows 에서만 default_window_icon 으로 icon 을 채우고, macOS 는 종전대로
+    // 텍스트 라벨만. 아이콘 PNG 상수와 set_tray_icon_for_remaining 호출은 호환성을
+    // 위해 남겨두되 본체는 no-op.
+    let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .title("…")
-        .menu(&menu)
+        .menu(&menu);
+
+    #[cfg(target_os = "windows")]
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    }
+
+    let _tray = tray_builder
         .on_menu_event(|app, event| {
             let id = event.id.as_ref();
             // 계정 전환 클릭은 webview 쪽에서 store/Rust 모두 한 트랜잭션으로

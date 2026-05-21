@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.74.0"
+version = "1.74.1"
 description = "Claude Desk Pet"
 authors = ["you"]
 license = ""
@@ -19,7 +19,10 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.10.3", features = ["macos-private-api", "tray-icon", "image-png"] }
+# v1.74.1 진단용: release 빌드에서도 WebView 우클릭 inspector 가 열리도록 devtools
+# 기본 활성. Windows 흰 화면 실제 원인을 사용자 환경에서 콘솔 한 줄로 확인하기 위함.
+# 본 수정이 v1.75 에 들어가 진단이 끝나면 이 feature 는 다시 빼는 게 정상.
+tauri = { version = "2.10.3", features = ["macos-private-api", "tray-icon", "image-png", "devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
