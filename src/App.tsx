@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   Account,
   AccountsConfig,
+  PetState,
   PlanConfig,
   SessionInfo,
   TrayMode,
@@ -262,6 +263,153 @@ export function AnimPreviewApp() {
           </div>
           <div className="preview-label">disconnected · 연결 실패 표지판</div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const SKIN_GRID_STATES: PetState[] = [
+  "full",
+  "high",
+  "good",
+  "mid",
+  "low",
+  "tired",
+  "sleepy",
+  "dead",
+  "disconnected",
+];
+
+export function SkinGridApp() {
+  const [skinId, setSkinId] = useState(SKINS[SKINS.length - 1]?.id ?? DEFAULT_SKIN_ID);
+  const [bg, setBg] = useState<"checker" | "white" | "dark">("checker");
+  const [showGuide, setShowGuide] = useState(true);
+  const skin = findSkin(skinId);
+
+  const bgStyle: React.CSSProperties =
+    bg === "checker"
+      ? {
+          backgroundImage:
+            "linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2a2a 75%), linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)",
+          backgroundSize: "16px 16px",
+          backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0",
+          backgroundColor: "#1f1f1f",
+        }
+      : bg === "white"
+        ? { backgroundColor: "#ffffff" }
+        : { backgroundColor: "#0a0a0a" };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        padding: 16,
+        fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+        background: "#1a1a1a",
+        color: "#eee",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          gap: 16,
+          alignItems: "center",
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 18 }}>Skin Grid</h1>
+        <label>
+          스킨{" "}
+          <select value={skinId} onChange={(e) => setSkinId(e.target.value)}>
+            {SKINS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          배경{" "}
+          <select value={bg} onChange={(e) => setBg(e.target.value as "checker" | "white" | "dark")}>
+            <option value="checker">체크무늬</option>
+            <option value="white">흰색</option>
+            <option value="dark">어두움</option>
+          </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={showGuide}
+            onChange={(e) => setShowGuide(e.target.checked)}
+          />{" "}
+          중심선·바닥선
+        </label>
+        <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 12 }}>
+          objectFit: contain — 원본 PNG 그대로 비례 유지
+        </span>
+      </header>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {SKIN_GRID_STATES.map((state) => (
+          <div key={state} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: "1 / 1",
+                ...bgStyle,
+                border: "1px solid #333",
+                overflow: "hidden",
+              }}
+            >
+              <img
+                src={skin.frames[state]}
+                alt={state}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                  display: "block",
+                }}
+                draggable={false}
+              />
+              {showGuide && (
+                <>
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      bottom: 0,
+                      left: "50%",
+                      width: 1,
+                      background: "rgba(255, 0, 100, 0.5)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: "1.25%",
+                      height: 1,
+                      background: "rgba(0, 200, 255, 0.5)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                </>
+              )}
+            </div>
+            <div style={{ textAlign: "center", fontSize: 12, opacity: 0.85 }}>{state}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

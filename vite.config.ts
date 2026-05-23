@@ -41,6 +41,7 @@ export default defineConfig({
         settings: resolve(__dirname, 'settings.html'),
         onboarding: resolve(__dirname, 'onboarding.html'),
         preview: resolve(__dirname, 'preview.html'),
+        'skin-grid': resolve(__dirname, 'skin-grid.html'),
       },
     },
   },
