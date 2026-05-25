@@ -1738,7 +1738,14 @@ function Settings({
                 account={acc}
                 active={acc.id === accounts.activeAccountId}
                 editing={formMode === acc.id}
-                onActivate={() => setActive(acc.id)}
+                onActivate={() => {
+                  setActive(acc.id);
+                  // 편집 폼이 이미 열려 있으면(다른 계정 편집 중) 방금 누른
+                  // 계정으로 폼도 따라오게 한다. 폼이 닫혀 있거나(null) "새 계정"
+                  // 모드면 그대로 둔다. (formMode 만 바뀌고 AccountForm 의
+                  // useState 가 안 따라오던 건 key={target.id} 로 remount 보장)
+                  setFormMode((m) => (m && m !== "new" ? acc.id : m));
+                }}
                 onRemove={() => removeAccount(acc.id)}
                 onEdit={() =>
                   setFormMode(formMode === acc.id ? null : acc.id)
@@ -1770,6 +1777,7 @@ function Settings({
               if (!target) return null;
               return (
                 <AccountForm
+                  key={target.id}
                   mode="edit"
                   existing={target}
                   existingLabels={accounts.accounts
