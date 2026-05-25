@@ -47,6 +47,11 @@ export async function loadAccountsConfig(): Promise<AccountsConfig> {
 // Tauri Store에서 읽어온 세 값을 받아 어떤 AccountsConfig가 결과인지 + 새로
 // 디스크에 써야 하는지 결정하는 pure 함수. `loadAccountsConfig`의 IO 본체와
 // 분리해 cryptoRandomId만 의존성으로 주입한다. cargo test 대신 vitest로 검증.
+//
+// 2026-05-26 provider 추가 메모: 새 ClaudeAccount.provider 는 *optional*
+// 이라 legacy 계정(`provider` 필드 없음) 도 그대로 ClaudeAccount union 으로
+// 매칭된다. 따라서 read-time 마이그레이션이 필요 없고, 기존 frozen 케이스
+// (provider 필드 없는 fixture) 들도 모양 변경 없이 그대로 통과한다.
 export function buildAccountsConfigFromLegacy(
   existing: AccountsConfig | null,
   oldApi: ApiConfig | null,
@@ -81,12 +86,15 @@ export async function saveAccountsConfig(cfg: AccountsConfig): Promise<void> {
   await store.save();
 }
 
-// Legacy. 활성 계정의 자격증명을 ApiConfig 모양으로 돌려준다.
-// 호출처가 단계적으로 loadAccountsConfig로 옮겨지는 동안 유지.
+// Legacy. 활성 계정의 자격증명을 ApiConfig 모양으로 돌려준다 — claude
+// 계정에만 의미가 있다. gemini 계정이 활성이면 null 반환 (호출처가 이걸
+// 보고 옛 claude-only 경로를 건너뛰게). provider 필드가 없는 legacy 저장본은
+// 자동으로 claude 로 본다.
 export async function loadApiConfig(): Promise<ApiConfig | null> {
   const cfg = await loadAccountsConfig();
   const active = cfg.accounts.find((a) => a.id === cfg.activeAccountId);
   if (!active) return null;
+  if (active.provider === "gemini") return null;
   return { orgId: active.orgId, cookie: active.cookie };
 }
 

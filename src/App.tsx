@@ -7,6 +7,7 @@ import type {
   AccountsConfig,
   PetState,
   PlanConfig,
+  ProviderId,
   SessionInfo,
   TrayMode,
   UsageSnapshot,
@@ -136,20 +137,31 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
         : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
       await savePlanConfig(synced);
     }
-    await invoke("set_api_config", {
-      orgId: active.orgId,
-      cookie: active.cookie,
-      platformOrgId: active.platformOrgId ?? null,
-      platformCookie: active.platformCookie ?? null,
-    }).catch(() => {});
+    // provider 별로 main.cjs 가 받는 credentials 모양이 다르다. main 의
+    // normalizeApiConfig 는 평탄한 모양({orgId, cookie}) 도 받아주지만,
+    // provider 가 명시되면 그 path 로 분기시키기 위해 명시적으로 보낸다.
+    if (active.provider === "gemini") {
+      await invoke("set_api_config", {
+        provider: "gemini",
+        credentials: { cookie: active.cookie },
+      }).catch(() => {});
+    } else {
+      await invoke("set_api_config", {
+        provider: "claude",
+        credentials: {
+          orgId: active.orgId,
+          cookie: active.cookie,
+          platformOrgId: active.platformOrgId ?? null,
+          platformCookie: active.platformCookie ?? null,
+        },
+      }).catch(() => {});
+    }
     await invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
     await invoke("refresh_usage").catch(() => {});
   } else {
     await invoke("set_api_config", {
-      orgId: null,
-      cookie: null,
-      platformOrgId: null,
-      platformCookie: null,
+      provider: "claude",
+      credentials: { orgId: null, cookie: null },
     }).catch(() => {});
   }
   await invoke("update_tray_accounts", {
@@ -468,12 +480,22 @@ export function PetApp() {
           setConfig(synced);
           setScale(clampScale(synced.petScale ?? PET_SCALE_DEFAULT));
 
-          invoke("set_api_config", {
-            orgId: active.orgId,
-            cookie: active.cookie,
-            platformOrgId: active.platformOrgId ?? null,
-            platformCookie: active.platformCookie ?? null,
-          }).catch(() => {});
+          if (active.provider === "gemini") {
+            invoke("set_api_config", {
+              provider: "gemini",
+              credentials: { cookie: active.cookie },
+            }).catch(() => {});
+          } else {
+            invoke("set_api_config", {
+              provider: "claude",
+              credentials: {
+                orgId: active.orgId,
+                cookie: active.cookie,
+                platformOrgId: active.platformOrgId ?? null,
+                platformCookie: active.platformCookie ?? null,
+              },
+            }).catch(() => {});
+          }
           invoke("set_active_skin", { skinId: active.skinId }).catch(() => {});
           invoke("update_tray_accounts", {
             accounts: accCfg.accounts.map((a) => ({ id: a.id, label: a.label })),
@@ -1786,7 +1808,11 @@ function AccountCard({
   onEdit: () => void;
 }) {
   const skin = findSkin(account.skinId);
-  const orgTail = account.orgId.slice(-4);
+  // 카드의 우상단 꼬리표 — provider 별로 다른 id 를 노출. Claude 는 orgId 끝
+  // 4자리(`…b4f5`), Gemini 는 provider 라벨(`Gemini`) 자체. 두 경우 모두 짧은
+  // 한 줄로 만들어 카드 폭을 안 늘림.
+  const orgTail =
+    account.provider === "gemini" ? "Gemini" : (account.orgId ?? "").slice(-4);
   // 카드 본체 클릭의 의미를 상태별로 갈라준다. 활성 카드를 또 활성화시키는
   // 건 무의미하니, 그 클릭은 자연스레 "편집 열기"로 해석한다. 비활성 카드는
   // 1차로 활성 전환, 두 번째 클릭(이젠 활성)에서 편집이 열리는 흐름.
@@ -1854,15 +1880,24 @@ function AccountForm({
     if (!existingLabels.includes("서브 계정")) return "서브 계정";
     return `계정 ${existingLabels.length + 1}`;
   });
+  // provider 토글 — 기존 계정 편집은 그대로, 새 계정은 claude 기본.
+  // v2.18 추가. 편집 모드에선 disabled (계정 자체의 provider 를 바꾸는 건
+  // 자격증명을 다시 받는 것과 같아서, 새 계정 추가로 처리하는 게 명확).
+  const initialProvider: ProviderId =
+    existing && existing.provider === "gemini" ? "gemini" : "claude";
+  const [provider, setProvider] = useState<ProviderId>(initialProvider);
   const [skin, setSkin] = useState(existing?.skinId ?? DEFAULT_SKIN_ID);
-  const [orgId, setOrgId] = useState(existing?.orgId ?? "");
-  const [cookie, setCookie] = useState(existing?.cookie ?? "");
-  const [platformOrgId, setPlatformOrgId] = useState(
-    existing?.platformOrgId ?? "",
+  // Claude 자격증명 (provider==="claude" 일 때만 의미)
+  const claudeExisting = existing && existing.provider !== "gemini" ? existing : null;
+  const geminiExisting = existing && existing.provider === "gemini" ? existing : null;
+  const [orgId, setOrgId] = useState(claudeExisting?.orgId ?? "");
+  const [cookie, setCookie] = useState(
+    provider === "gemini"
+      ? geminiExisting?.cookie ?? ""
+      : claudeExisting?.cookie ?? "",
   );
-  const [platformCookie, setPlatformCookie] = useState(
-    existing?.platformCookie ?? "",
-  );
+  const [platformOrgId, setPlatformOrgId] = useState(claudeExisting?.platformOrgId ?? "");
+  const [platformCookie, setPlatformCookie] = useState(claudeExisting?.platformCookie ?? "");
   const [testStatus, setTestStatus] = useState<string>("");
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
@@ -1872,7 +1907,11 @@ function AccountForm({
     setPasteValue("");
     setPasteMode(true);
     try {
-      await invoke("open_claude_usage_in_browser");
+      if (provider === "gemini") {
+        await invoke("open_gemini_usage_in_browser");
+      } else {
+        await invoke("open_claude_usage_in_browser");
+      }
     } catch (e) {
       setTestStatus(`브라우저 열기 실패: ${String(e)}`);
     }
@@ -1880,6 +1919,16 @@ function AccountForm({
 
   const handlePasteValue = async (raw: string) => {
     setPasteValue(raw);
+    if (provider === "gemini") {
+      // Gemini 는 autoExtract 미지원 — 쿠키 한 줄을 그대로 cookie 필드로
+      // 옮겨두기만 한다. main.cjs 의 capabilities.autoExtract=false 와 짝.
+      if (!raw.includes("SAPISID") && !raw.includes("__Secure-1PSID")) return;
+      setCookie(raw.trim());
+      setPasteMode(false);
+      setPasteValue("");
+      setTestStatus("Gemini 쿠키를 그대로 옮겼어요. 테스트를 눌러 확인해 주세요.");
+      return;
+    }
     if (!raw.includes("sessionKey=")) return;
     setTestStatus("Cookie 분석 중…");
     try {
@@ -1898,6 +1947,30 @@ function AccountForm({
   };
 
   const test = async () => {
+    if (provider === "gemini") {
+      if (!cookie.trim()) {
+        setTestStatus("Gemini 쿠키를 채워주세요.");
+        return;
+      }
+      setTestStatus("테스트 중...");
+      try {
+        const res = await invoke<{
+          five_hour_pct: number;
+          weekly_pct: number;
+          tier?: string | null;
+        }>("test_api_config", {
+          provider: "gemini",
+          credentials: { cookie: cookie.trim() },
+        });
+        const tierPart = res.tier ? ` · ${res.tier}` : "";
+        setTestStatus(
+          `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%${tierPart}`,
+        );
+      } catch (e: unknown) {
+        setTestStatus(String(e));
+      }
+      return;
+    }
     if (!orgId.trim() || !cookie.trim()) {
       setTestStatus("Org ID와 쿠키를 모두 채워주세요.");
       return;
@@ -1912,10 +1985,13 @@ function AccountForm({
         prepaid_dollars: number | null;
         prepaid_error: string | null;
       }>("test_api_config", {
-        orgId: orgId.trim(),
-        cookie: cookie.trim(),
-        platformOrgId: trimmedPlatform || null,
-        platformCookie: trimmedPlatformCookie || null,
+        provider: "claude",
+        credentials: {
+          orgId: orgId.trim(),
+          cookie: cookie.trim(),
+          platformOrgId: trimmedPlatform || null,
+          platformCookie: trimmedPlatformCookie || null,
+        },
       });
       const usagePart = `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%`;
       let prepaidPart = "";
@@ -1938,6 +2014,20 @@ function AccountForm({
   };
 
   const submit = () => {
+    if (provider === "gemini") {
+      if (!cookie.trim()) {
+        setTestStatus("Gemini 쿠키를 채워주세요.");
+        return;
+      }
+      onSubmit({
+        id: existing?.id ?? cryptoRandomId(),
+        label: label.trim() || "이름 없음",
+        provider: "gemini",
+        cookie: cookie.trim(),
+        skinId: skin,
+      });
+      return;
+    }
     if (!orgId.trim() || !cookie.trim()) {
       setTestStatus("Org ID와 쿠키를 모두 채워주세요.");
       return;
@@ -1947,6 +2037,7 @@ function AccountForm({
     onSubmit({
       id: existing?.id ?? cryptoRandomId(),
       label: label.trim() || "이름 없음",
+      provider: "claude",
       orgId: orgId.trim(),
       cookie: cookie.trim(),
       skinId: skin,
@@ -1992,6 +2083,40 @@ function AccountForm({
           ))}
         </div>
       </div>
+      {/* Provider 토글 — 새 계정 추가 모드에서만 노출. 편집 모드에선 자격증명
+          모양이 이미 정해진 상태라 토글 위험 (Claude orgId 가 Gemini 에 안
+          쓰여서 자료 손실). 바꾸려면 새 계정 추가로 처리. */}
+      {mode === "new" && (
+        <div className="provider-picker" role="radiogroup" aria-label="서비스">
+          <span className="skin-picker-label">서비스</span>
+          <div className="provider-tabs">
+            <button
+              type="button"
+              className={`provider-tab ${provider === "claude" ? "selected" : ""}`}
+              onClick={() => {
+                setProvider("claude");
+                setCookie("");
+                setTestStatus("");
+              }}
+              aria-pressed={provider === "claude"}
+            >
+              Claude
+            </button>
+            <button
+              type="button"
+              className={`provider-tab ${provider === "gemini" ? "selected" : ""}`}
+              onClick={() => {
+                setProvider("gemini");
+                setCookie("");
+                setTestStatus("");
+              }}
+              aria-pressed={provider === "gemini"}
+            >
+              Gemini
+            </button>
+          </div>
+        </div>
+      )}
       {pasteMode && (
         <div className="paste-capture">
           <div className="paste-capture-head">
@@ -2009,14 +2134,26 @@ function AccountForm({
               ✕
             </button>
           </div>
-          <ol className="paste-capture-steps">
-            <li>Chrome 탭에서 <code>⌘⌥I</code> → Network 탭</li>
-            <li><code>usage</code> 요청 → Headers → <code>cookie:</code> 한 줄 복사</li>
-            <li>아래 칸에 ⌘V로 붙여넣기 (자동 처리)</li>
-          </ol>
+          {provider === "gemini" ? (
+            <ol className="paste-capture-steps">
+              <li>방금 열린 Gemini 탭에서 <code>⌘⌥I</code> → Network 탭</li>
+              <li><code>batchexecute</code> 요청 (아무거나) → Headers → <code>cookie:</code> 한 줄 복사</li>
+              <li>아래 칸에 ⌘V로 붙여넣기 (자동 처리)</li>
+            </ol>
+          ) : (
+            <ol className="paste-capture-steps">
+              <li>Chrome 탭에서 <code>⌘⌥I</code> → Network 탭</li>
+              <li><code>usage</code> 요청 → Headers → <code>cookie:</code> 한 줄 복사</li>
+              <li>아래 칸에 ⌘V로 붙여넣기 (자동 처리)</li>
+            </ol>
+          )}
           <textarea
             autoFocus
-            placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+            placeholder={
+              provider === "gemini"
+                ? "SID=...; __Secure-1PSID=...; __Secure-3PSID=...; SAPISID=...; __Secure-1PAPISID=...; __Secure-3PAPISID=..."
+                : "sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+            }
             value={pasteValue}
             onChange={(e) => handlePasteValue(e.target.value)}
             rows={3}
@@ -2024,62 +2161,85 @@ function AccountForm({
           />
         </div>
       )}
-      <label>
-        Organization ID
-        <input
-          type="text"
-          placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
-          value={orgId}
-          onChange={(e) => setOrgId(e.target.value)}
-          spellCheck={false}
-        />
-      </label>
-      <label>
-        세션 쿠키 (5개만)
-        <textarea
-          placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
-          value={cookie}
-          onChange={(e) => setCookie(e.target.value)}
-          rows={4}
-          spellCheck={false}
-        />
-      </label>
-      <label>
-        Platform Org UUID <span className="field-optional">(선택)</span>
-        <input
-          type="text"
-          placeholder="e25725d1-78db-40f8-a555-68593feb25bb"
-          value={platformOrgId}
-          onChange={(e) => setPlatformOrgId(e.target.value)}
-          spellCheck={false}
-        />
-        <span className="field-hint">
-          prepaid 잔액을 트레이 "5h+주간+$" 모드에서 보고 싶을 때만 채워주세요.
-          비워두면 prepaid 호출 자체를 안 합니다. 값은{" "}
-          <code>platform.claude.com/settings/billing</code> → DevTools → Network 탭의{" "}
-          <code>prepaid/credits</code> 요청 URL에서 추출.
-          <strong> claude.ai의 Org ID와 완전히 다른 UUID</strong>예요.
-        </span>
-      </label>
-      <label>
-        Platform Cookie <span className="field-optional">(선택)</span>
-        <textarea
-          placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
-          value={platformCookie}
-          onChange={(e) => setPlatformCookie(e.target.value)}
-          rows={3}
-          spellCheck={false}
-        />
-        <span className="field-hint">
-          위 Platform Org UUID로 호출했는데 <code>HTTP 403</code>이 떨어지면
-          채워주세요. <strong>platform.claude.com</strong>은 claude.ai와{" "}
-          <strong>별도 쿠키 컨텍스트</strong>예요. 같은{" "}
-          <code>platform.claude.com/settings/billing</code> 페이지의 DevTools →
-          Network 탭에서 <code>prepaid/credits</code> 요청 → Headers →{" "}
-          <code>cookie:</code> 한 줄 통째로 복사. 비워두면 위쪽 세션 쿠키를
-          그대로 시도합니다.
-        </span>
-      </label>
+      {provider === "claude" && (
+        <>
+          <label>
+            Organization ID
+            <input
+              type="text"
+              placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
+              value={orgId}
+              onChange={(e) => setOrgId(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            세션 쿠키 (5개만)
+            <textarea
+              placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+              value={cookie}
+              onChange={(e) => setCookie(e.target.value)}
+              rows={4}
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            Platform Org UUID <span className="field-optional">(선택)</span>
+            <input
+              type="text"
+              placeholder="e25725d1-78db-40f8-a555-68593feb25bb"
+              value={platformOrgId}
+              onChange={(e) => setPlatformOrgId(e.target.value)}
+              spellCheck={false}
+            />
+            <span className="field-hint">
+              prepaid 잔액을 트레이 "5h+주간+$" 모드에서 보고 싶을 때만 채워주세요.
+              비워두면 prepaid 호출 자체를 안 합니다. 값은{" "}
+              <code>platform.claude.com/settings/billing</code> → DevTools → Network 탭의{" "}
+              <code>prepaid/credits</code> 요청 URL에서 추출.
+              <strong> claude.ai의 Org ID와 완전히 다른 UUID</strong>예요.
+            </span>
+          </label>
+          <label>
+            Platform Cookie <span className="field-optional">(선택)</span>
+            <textarea
+              placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
+              value={platformCookie}
+              onChange={(e) => setPlatformCookie(e.target.value)}
+              rows={3}
+              spellCheck={false}
+            />
+            <span className="field-hint">
+              위 Platform Org UUID로 호출했는데 <code>HTTP 403</code>이 떨어지면
+              채워주세요. <strong>platform.claude.com</strong>은 claude.ai와{" "}
+              <strong>별도 쿠키 컨텍스트</strong>예요. 같은{" "}
+              <code>platform.claude.com/settings/billing</code> 페이지의 DevTools →
+              Network 탭에서 <code>prepaid/credits</code> 요청 → Headers →{" "}
+              <code>cookie:</code> 한 줄 통째로 복사. 비워두면 위쪽 세션 쿠키를
+              그대로 시도합니다.
+            </span>
+          </label>
+        </>
+      )}
+      {provider === "gemini" && (
+        <label>
+          Gemini 쿠키 (한 줄 전체)
+          <textarea
+            placeholder="SID=g.a0...; __Secure-1PSID=...; __Secure-3PSID=...; SAPISID=...; __Secure-1PAPISID=...; __Secure-3PAPISID=..."
+            value={cookie}
+            onChange={(e) => setCookie(e.target.value)}
+            rows={5}
+            spellCheck={false}
+          />
+          <span className="field-hint">
+            <code>gemini.google.com</code> 에서 로그인된 상태로 DevTools → Network 탭 →
+            아무 <code>batchexecute</code> 요청 → Headers → <code>cookie:</code> 한 줄
+            통째로 복사해 붙여 넣어주세요. 최소{" "}
+            <code>SID / __Secure-1PSID / __Secure-3PSID / SAPISID / __Secure-1PAPISID
+            / __Secure-3PAPISID</code> 가 포함돼 있어야 호출이 통과합니다.
+          </span>
+        </label>
+      )}
       <div className="api-actions">
         <button type="button" onClick={autoCapture}>
           자동으로 가져오기

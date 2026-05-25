@@ -199,6 +199,21 @@
 - [ ] **수동 입력 fallback**: 자동 가져오기 안 써도 ①② 안내대로 직접 붙여넣기 여전히 동작 (기존 Organization ID + 세션 쿠키 필드 그대로 사용)
 - [ ] **Chrome이 기본 브라우저가 아닌 경우**: macOS 기본 브라우저가 Safari/Firefox/Arc면 그쪽에서 열림. 사용자 환경에 맞게 동작
 
+## 17. Provider 분리 — Gemini 추가 (v2.18+)
+
+`Account` 가 discriminated union(`provider: "claude" | "gemini"`) 으로 분기. 옛 단일 Claude 가정에서 멀티 provider 로 옮겨졌다. 검증 포커스는 (a) legacy claude 계정이 손실 없이 그대로 도는지 (b) Gemini 한 계정으로 추가/전환 시 사용량이 라이브로 뜨는지 (c) 두 provider 가 트레이/UsageBubble 양쪽에 같은 모양으로 그려지는지.
+
+- [ ] **Legacy claude 계정 자동 인식**: 옛 store(`provider` 필드 없음) 그대로 부팅하면 메뉴바 라벨에 5h%/주간% 가 종전대로 표시되고 펫 표정이 normal. 마이그레이션 메시지나 onboarding 다시 안 뜸
+- [ ] **Gemini 계정 추가**: 설정 → 새 계정 추가 → 상단 "Gemini" 탭 클릭 → "자동으로 가져오기" 누르면 `gemini.google.com/usage` 가 Chrome 에 열림 → DevTools Network → cookie 한 줄 복사 → 붙여넣기 칸에 paste → cookie 필드에 그대로 옮겨짐
+- [ ] **Gemini 테스트 버튼**: 테스트 누르면 한 줄에 `5h XX% · 주간 XX% · PRO` (또는 ULTRA/PLUS) 표시. tier 가 비어 있어도 5h/주간 두 값은 항상 표시
+- [ ] **Gemini 활성 시 트레이**: Gemini 를 활성 계정으로 두면 트레이 라벨에 Gemini 의 5h%/주간% 가 동일 포맷으로 표시 (panda v1.96+ 대나무 tier 아이콘도 같이 동작)
+- [ ] **Provider 전환**: 트레이 메뉴 "계정" 서브메뉴에서 Claude ↔ Gemini 전환 시 한 번의 polling cycle(30s 이내) 안에 트레이 라벨이 새 provider 값으로 갱신, 펫 표정도 새 잔량 % 기준으로 재계산
+- [ ] **Provider별 paste hint**: paste capture 박스 안의 안내문이 provider 에 맞게 바뀜 — Claude 는 `usage` 요청, Gemini 는 `batchexecute` 요청을 가리킴
+- [ ] **편집 모드 provider 토글 비노출**: 기존 계정 편집 시 provider 탭은 안 뜸 (자료 손실 위험 방지)
+- [ ] **WIZ scrape 실패 메시지**: Gemini 쿠키가 만료됐거나 SID 만 빠진 채로 저장하면 설정창 status 가 "쿠키 만료 또는 Google 로그아웃 상태" 류 한 줄로 표시 (응답 빈 페이지가 그대로 튀어나오지 않음)
+- [ ] **prepaid 미지원 가드**: Gemini 활성 계정 + trayMode="all"(5h+주간+$) 라도 prepaid 호출은 일어나지 않고 `$` 부분은 자동으로 빠짐 (provider.capabilities.prepaid=false 분기)
+- [ ] **테스트 회귀 없음**: `npm test` 의 frozen 케이스(claudeApi.test.mjs 12건, store.test.ts 13건) 가 모두 통과. 새 케이스 +45 (providers/gemini.test.mjs 29 + providers/index.test.mjs 10 + store.test.ts 신규 6)
+
 ## 16. 업데이트 일지 + 업데이트 팝업 (v2.26+)
 
 큰 작업만 큐레이션한 일지(`src/changelog.ts`). 트레이 메뉴 "업데이트 일지" → 전체 목록. 새 버전으로 올라가면 부팅 시 "방금 업데이트됨" 팝업(직전 본 버전 이후 항목만).

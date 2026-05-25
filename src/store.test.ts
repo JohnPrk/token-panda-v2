@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildAccountsConfigFromLegacy, cryptoRandomId } from "./store";
-import type { AccountsConfig, ApiConfig, PlanConfig } from "./types";
+import type { AccountsConfig, ApiConfig, GeminiAccount, PlanConfig } from "./types";
+import { accountProvider } from "./types";
 
 const fixedId = () => "id-fixed-1";
 
@@ -187,6 +188,95 @@ describe("buildAccountsConfigFromLegacy", () => {
     expect(count).toBe(1);
     expect(config.activeAccountId).toBe("id-1");
     expect(config.accounts[0].id).toBe("id-1");
+  });
+});
+
+// ===== Gemini provider 도입 후 추가 회귀 (v2.18, 2026-05-26) =====
+// 기존 케이스(provider 필드 없음)는 9-E 룰에 따라 손대지 않고, 새 회귀만 추가.
+
+describe("buildAccountsConfigFromLegacy — provider 도입 후 안전망", () => {
+  it("기존 legacy account(provider undefined) 가 union 의 claude 쪽으로 매칭된다", () => {
+    const existing: AccountsConfig = {
+      accounts: [
+        { id: "a1", label: "A", orgId: "o", cookie: "c", skinId: "panda" },
+      ],
+      activeAccountId: "a1",
+    };
+    const { config } = buildAccountsConfigFromLegacy(existing, null, null, fixedId);
+    // accountProvider 가 legacy 를 "claude" 로 정규화하는지
+    expect(accountProvider(config.accounts[0])).toBe("claude");
+  });
+
+  it("Gemini 계정과 Claude 계정이 섞여 있어도 needsWrite=false 로 그대로 보존", () => {
+    const gem: GeminiAccount = {
+      id: "g1",
+      label: "Gemini PRO",
+      provider: "gemini",
+      cookie: "SID=...; SAPISID=...",
+      skinId: "panda",
+    };
+    const existing: AccountsConfig = {
+      accounts: [
+        { id: "a1", label: "Claude", orgId: "o", cookie: "c", skinId: "cat" },
+        gem,
+      ],
+      activeAccountId: "g1",
+    };
+    const { config, needsWrite } = buildAccountsConfigFromLegacy(
+      existing,
+      null,
+      null,
+      fixedId,
+    );
+    expect(needsWrite).toBe(false);
+    expect(config.accounts).toHaveLength(2);
+    expect(accountProvider(config.accounts[0])).toBe("claude");
+    expect(accountProvider(config.accounts[1])).toBe("gemini");
+  });
+
+  it("legacy oldApi 마이그레이션 결과는 union 의 claude 쪽으로 식별된다", () => {
+    const oldApi: ApiConfig = { orgId: "o", cookie: "c" };
+    const { config } = buildAccountsConfigFromLegacy(null, oldApi, null, fixedId);
+    expect(accountProvider(config.accounts[0])).toBe("claude");
+  });
+});
+
+describe("accountProvider 정규화 helper", () => {
+  it("provider undefined → claude", () => {
+    expect(
+      accountProvider({
+        id: "a1",
+        label: "A",
+        orgId: "o",
+        cookie: "c",
+        skinId: "panda",
+      }),
+    ).toBe("claude");
+  });
+
+  it('provider "claude" → claude', () => {
+    expect(
+      accountProvider({
+        id: "a1",
+        label: "A",
+        provider: "claude",
+        orgId: "o",
+        cookie: "c",
+        skinId: "panda",
+      }),
+    ).toBe("claude");
+  });
+
+  it('provider "gemini" → gemini', () => {
+    expect(
+      accountProvider({
+        id: "g1",
+        label: "G",
+        provider: "gemini",
+        cookie: "SID=...",
+        skinId: "panda",
+      }),
+    ).toBe("gemini");
   });
 });
 

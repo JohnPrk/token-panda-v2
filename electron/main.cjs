@@ -8,6 +8,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen } = 
 const path = require("path");
 const { pathToFileURL } = require("url");
 const claudeApi = require("./claudeApi.cjs");
+const providers = require("./providers/index.cjs");
 const createStore = require("./store.cjs");
 const updater = require("./updater.cjs");
 const installer = require("./installer.cjs");
@@ -58,7 +59,13 @@ let trayAccounts = [];
 let trayActiveId = null;
 let lastRemaining = 1; // 마지막 5h 잔량(0-1). 트레이 아이콘 tier 갱신용
 
-let apiConfig = null; // { orgId, cookie, platformOrgId, platformCookie }
+// apiConfig 는 활성 계정 한 개의 자격증명 + provider id 묶음.
+// 모양 (provider 별로 credentials 만 다름):
+//   { provider: "claude", credentials: { orgId, cookie, platformOrgId?, platformCookie? } }
+//   { provider: "gemini", credentials: { cookie } }
+// `set_api_config` IPC 는 legacy 호출(provider 필드 없는 평탄한 모양) 도
+// 받아서 normalizeApiConfig 가 새 모양으로 만들어 준다.
+let apiConfig = null;
 let latest = null; // ApiUsage
 let lastError = null;
 let pollTimer = null;
@@ -363,18 +370,31 @@ function buildSnapshot() {
   };
 }
 
-// platformOrgId 가 설정돼 있을 때만 prepaid 호출. usage 와 분리된 cycle 이라
-// platform cookie 가 따로 있으면 그걸 쓰고, 아니면 claude.ai cookie 재사용
-// (두 도메인이 같은 sessionKey 를 공유하는 케이스 대응).
+// provider 가 prepaid 를 지원하고(capabilities.prepaid) 자격증명에 platformOrgId
+// 가 있을 때만 prepaid 호출. usage 와 분리된 cycle 이라 platform cookie 가
+// 따로 있으면 그걸 쓰고, 아니면 claude.ai cookie 재사용 (두 도메인이 같은
+// sessionKey 를 공유하는 케이스 대응). gemini 등 prepaid 미지원 provider 는
+// 그냥 null 로 둔다.
 async function pollPrepaid() {
-  if (!apiConfig || !apiConfig.platformOrgId) {
+  if (!apiConfig) {
     prepaid = null;
     prepaidError = null;
     return;
   }
-  const ck = apiConfig.platformCookie || apiConfig.cookie;
+  const provider = providers.resolveProvider(apiConfig.provider);
+  if (!provider.capabilities.prepaid || typeof provider.fetchPrepaid !== "function") {
+    prepaid = null;
+    prepaidError = null;
+    return;
+  }
+  const creds = apiConfig.credentials || {};
+  if (!creds.platformOrgId) {
+    prepaid = null;
+    prepaidError = null;
+    return;
+  }
   try {
-    const dollars = await claudeApi.fetchPrepaid(apiConfig.platformOrgId, ck);
+    const dollars = await provider.fetchPrepaid(creds);
     prepaid = { dollars, fetched_at: new Date().toISOString() };
     prepaidError = null;
   } catch (e) {
@@ -392,8 +412,9 @@ async function pollOnce() {
     broadcast("usage-update", buildSnapshot());
     return;
   }
+  const provider = providers.resolveProvider(apiConfig.provider);
   try {
-    latest = await claudeApi.fetchUsage(apiConfig.orgId, apiConfig.cookie);
+    latest = await provider.fetchUsage(apiConfig.credentials);
     lastError = null;
     authPopupShown = false; // 다음 만료 사이클에서 다시 한 번 띄우게 reset
   } catch (err) {
@@ -572,20 +593,48 @@ function createTray() {
   rebuildTray();
 }
 
+// IPC `set_api_config` / `test_api_config` 의 인자 normalize. App.tsx 가
+// 새 모양({provider, credentials}) 으로 보내든, 옛 평탄한 모양({orgId, cookie,
+// platformOrgId, platformCookie}) 으로 보내든 모두 받아 동일한 내부 표현
+// `{provider, credentials}` 으로 변환한다. orgId/cookie 같은 평탄한 키가
+// 보이면 무조건 claude, 그 외에 a.provider="gemini" 면 gemini.
+function normalizeApiConfig(a) {
+  const trim = (v) => (v != null ? String(v).trim() : "");
+  const providerId = a.provider === "gemini" ? "gemini" : "claude";
+  if (providerId === "gemini") {
+    // gemini: credentials = { cookie }
+    const c = a.credentials || a;
+    const cookie = trim(c.cookie);
+    if (!cookie) return null;
+    return { provider: "gemini", credentials: { cookie } };
+  }
+  // claude: credentials = { orgId, cookie, platformOrgId?, platformCookie? }
+  const c = a.credentials || a;
+  const orgId = trim(c.orgId);
+  const cookie = trim(c.cookie);
+  if (!orgId || !cookie) return null;
+  const platformOrgId = trim(c.platformOrgId);
+  const platformCookie = trim(c.platformCookie);
+  return {
+    provider: "claude",
+    credentials: {
+      orgId,
+      cookie,
+      platformOrgId: platformOrgId || null,
+      platformCookie: platformCookie || null,
+    },
+  };
+}
+
 async function handleCommand(cmd, a) {
   a = a || {};
   switch (cmd) {
     case "get_usage_snapshot":
       return buildSnapshot();
     case "set_api_config": {
-      const { orgId, cookie, platformOrgId, platformCookie } = a;
-      if (orgId && cookie && String(orgId).trim() && String(cookie).trim()) {
-        apiConfig = {
-          orgId: String(orgId).trim(),
-          cookie: String(cookie).trim(),
-          platformOrgId: platformOrgId ? String(platformOrgId).trim() : null,
-          platformCookie: platformCookie ? String(platformCookie).trim() : null,
-        };
+      const normalized = normalizeApiConfig(a);
+      if (normalized) {
+        apiConfig = normalized;
       } else {
         apiConfig = null;
         latest = null;
@@ -596,17 +645,23 @@ async function handleCommand(cmd, a) {
       return null;
     }
     case "test_api_config": {
-      const u = await claudeApi.fetchUsage(a.orgId, a.cookie); // 실패 시 throw
-      // platformOrgId 가 주어지면 prepaid 도 같이 시도 — 한 줄에 "usage X% ·
-      // prepaid $.." 또는 "prepaid err: .." 로 wizard 에 표시되게.
+      const normalized = normalizeApiConfig(a);
+      if (!normalized) {
+        throw new Error("자격증명이 비어 있습니다 (orgId/cookie 또는 gemini cookie).");
+      }
+      const provider = providers.resolveProvider(normalized.provider);
+      const u = await provider.fetchUsage(normalized.credentials);
+      // prepaid 지원 provider 면 같이 시도 — 한 줄에 "usage X% · prepaid $.." 또는
+      // "prepaid err: .." 로 wizard 에 표시되게.
       let prepaid_dollars = null;
       let prepaid_error = null;
-      if (a.platformOrgId && String(a.platformOrgId).trim()) {
+      if (
+        provider.capabilities.prepaid &&
+        typeof provider.fetchPrepaid === "function" &&
+        normalized.credentials.platformOrgId
+      ) {
         try {
-          prepaid_dollars = await claudeApi.fetchPrepaid(
-            String(a.platformOrgId).trim(),
-            String(a.platformCookie || a.cookie || "").trim(),
-          );
+          prepaid_dollars = await provider.fetchPrepaid(normalized.credentials);
         } catch (e) {
           prepaid_error = e && e.message ? e.message : String(e);
         }
@@ -630,8 +685,23 @@ async function handleCommand(cmd, a) {
     case "open_claude_usage_in_browser":
       await shell.openExternal("https://claude.ai/settings/usage");
       return null;
-    case "auto_extract_from_cookie":
-      return await claudeApi.autoExtract(a.rawCookie);
+    case "open_gemini_usage_in_browser":
+      await shell.openExternal("https://gemini.google.com/usage");
+      return null;
+    case "auto_extract_from_cookie": {
+      // provider 인식형. a.provider 가 비어 있거나 claude 면 옛 동작
+      // (claude.ai org_id 추출). gemini 는 autoExtract 미지원 (capability=false)
+      // 이라 throw — App.tsx 가 사용자에게 "쿠키 직접 입력" 만 시킨다.
+      const providerId = a.provider === "gemini" ? "gemini" : "claude";
+      const provider = providers.resolveProvider(providerId);
+      if (!provider.capabilities.autoExtract || typeof provider.autoExtract !== "function") {
+        throw new Error(`${provider.displayName} provider 는 쿠키 자동 추출을 지원하지 않습니다.`);
+      }
+      const r = await provider.autoExtract(a.rawCookie);
+      // 옛 frontend 와의 호환: { org_id, cookie } snake_case 평탄 모양으로
+      // 돌려줌 (claude provider 의 r.legacy 에 그 모양이 들어 있음).
+      return r.legacy || r.credentials;
+    }
     case "set_tray_title": {
       // 프론트가 formatTrayLabel 로 계산한 5h%/주간%/$ 라벨. macOS 는 setTitle 로
       // 메뉴바 아이콘 옆에 *상시* 표시(옛 Tauri 동작). setToolTip 만 쓰면 hover 시에만

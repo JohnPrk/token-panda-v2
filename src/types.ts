@@ -1,9 +1,15 @@
+export type ProviderId = "claude" | "gemini";
+
 export type ApiUsage = {
+  /** 어느 provider 가 만든 스냅샷인지. legacy(undefined) 면 claude 로 간주. */
+  provider?: ProviderId;
   five_hour_pct: number;   // 0-100, utilization (NOT remaining)
   weekly_pct: number;
   five_hour_resets_at: string | null;
   weekly_resets_at: string | null;
   fetched_at: string;
+  /** Gemini 가 채우는 요금제 라벨 (PRO / ULTRA / PLUS). 다른 provider 는 미사용. */
+  tier?: string;
 };
 
 /** platform.claude.com 의 prepaid 잔액. dollars 단위(소수점 둘째자리). usage
@@ -79,15 +85,49 @@ export type ApiConfig = {
 // 떨어지는 케이스가 있다(사용자 보고 2026-05-18). 비워두면 메인 cookie를
 // 그대로 시도하고, 채워두면 그걸로 prepaid 호출만 분기한다 (usage 호출은
 // 메인 cookie 유지).
-export type Account = {
+// Account 는 provider 별 자격증명 모양이 달라 discriminated union 으로 둔다.
+// 단, Claude 쪽 `provider` 는 *optional* 로 둬서 `provider` 필드 없이 저장된
+// legacy 계정(클로드 단일 시절)이 자동으로 Claude 쪽 union 으로 매칭되도록
+// 한다 (read-time 마이그레이션이 필요 없음 → store.ts 의 frozen 테스트 보존).
+//
+// 런타임 분기는 항상 `account.provider === "gemini"` 한 가지만 본다. 그 외
+// (undefined / "claude") 는 모두 claude 경로. 새 provider 추가 시 여기에
+// 한 종류 더 더하고, `provider: "<id>"` 필수로 둔다.
+export type ClaudeAccount = {
   id: string;
   label: string;
+  skinId: string;
+  /** optional. 없으면 claude 로 간주 (legacy 호환). */
+  provider?: "claude";
   orgId: string;
   cookie: string;
-  skinId: string;
   platformOrgId?: string;
   platformCookie?: string;
 };
+
+export type GeminiAccount = {
+  id: string;
+  label: string;
+  skinId: string;
+  provider: "gemini";
+  /** gemini.google.com 의 raw Cookie 헤더 한 줄. 최소 SID/__Secure-1PSID/
+   *  __Secure-3PSID/SAPISID/__Secure-1PAPISID/__Secure-3PAPISID 가 들어 있어야
+   *  WIZ_global_data scrape + batchexecute POST 가 통과한다. */
+  cookie: string;
+  /** 구조적 호환을 위한 phantom 필드 — ClaudeAccount 와 같은 키를 가진
+   *  union 으로 만들어 `account.orgId` 같은 접근이 TS 에서 `string | undefined`
+   *  로 떨어지게 한다 (frozen 테스트 호환). 런타임에선 항상 undefined. */
+  orgId?: undefined;
+  platformOrgId?: undefined;
+  platformCookie?: undefined;
+};
+
+export type Account = ClaudeAccount | GeminiAccount;
+
+/** Account 의 provider 를 정규화. legacy(undefined) → "claude". */
+export function accountProvider(a: Account): ProviderId {
+  return a.provider === "gemini" ? "gemini" : "claude";
+}
 
 export type AccountsConfig = {
   accounts: Account[];
