@@ -45,6 +45,44 @@ import pandaV4Sleep from "./skins/panda-v4/sleep.png";
 import pandaV4Dead from "./skins/panda-v4/dead.png";
 import pandaV4Sit from "./skins/panda-v4/sit.png";
 
+// dog-v1 — 주황+크림 시바견. cat-v2/panda-v4 와 같은 skin-sheet-split 처리
+// (흰 배경 8 포즈 시트 → connected-component 8 분할 + 디프린지 + 비율 정렬).
+// 표준 매핑(full=cheerful, high=idle, good=sit). 640×640 RGBA.
+import dogV1Idle from "./skins/dog-v1/idle.png";
+import dogV1Cheerful from "./skins/dog-v1/cheerful.png";
+import dogV1Tired from "./skins/dog-v1/tired.png";
+import dogV1Weary from "./skins/dog-v1/weary.png";
+import dogV1Sleepy from "./skins/dog-v1/sleepy.png";
+import dogV1Sleep from "./skins/dog-v1/sleep.png";
+import dogV1Dead from "./skins/dog-v1/dead.png";
+import dogV1Sit from "./skins/dog-v1/sit.png";
+
+// hippo-v1 — 회색 아기 하마. dog-v1 과 같은 skin-sheet-split 처리(흰 배경
+// 8 포즈 시트 → connected-component 8 분할 + 별/식은땀/Zzz 부속 병합 +
+// 디프린지 + 비율 정렬). 표준 매핑(full=cheerful, high=idle, good=sit).
+// 640×640 RGBA.
+import hippoV1Idle from "./skins/hippo-v1/idle.png";
+import hippoV1Cheerful from "./skins/hippo-v1/cheerful.png";
+import hippoV1Tired from "./skins/hippo-v1/tired.png";
+import hippoV1Weary from "./skins/hippo-v1/weary.png";
+import hippoV1Sleepy from "./skins/hippo-v1/sleepy.png";
+import hippoV1Sleep from "./skins/hippo-v1/sleep.png";
+import hippoV1Dead from "./skins/hippo-v1/dead.png";
+import hippoV1Sit from "./skins/hippo-v1/sit.png";
+
+// chick-v1 — 노란 아기 병아리. dog-v1/hippo-v1 과 같은 skin-sheet-split 처리
+// (흰 배경 8 포즈 시트 → connected-component 8 분할 + 별/식은땀/Zzz 부속 병합
+// + 디프린지 + 비율 정렬). 표준 매핑(full=cheerful, high=idle, good=sit).
+// 640×640 RGBA.
+import chickV1Idle from "./skins/chick-v1/idle.png";
+import chickV1Cheerful from "./skins/chick-v1/cheerful.png";
+import chickV1Tired from "./skins/chick-v1/tired.png";
+import chickV1Weary from "./skins/chick-v1/weary.png";
+import chickV1Sleepy from "./skins/chick-v1/sleepy.png";
+import chickV1Sleep from "./skins/chick-v1/sleep.png";
+import chickV1Dead from "./skins/chick-v1/dead.png";
+import chickV1Sit from "./skins/chick-v1/sit.png";
+
 // Action names used by the idle micro-action loop in App.tsx.
 // A skin can optionally provide a .gif for any of these to express the
 // motion via the gif itself instead of relying on CSS transforms.
@@ -119,6 +157,54 @@ export const SKINS: Skin[] = [
     },
     actions: {},
   },
+  {
+    id: "dog-v1",
+    name: "Dog v1",
+    frames: {
+      full: dogV1Cheerful,
+      high: dogV1Idle,
+      good: dogV1Sit,
+      mid: dogV1Tired,
+      low: dogV1Weary,
+      tired: dogV1Sleepy,
+      sleepy: dogV1Sleep,
+      dead: dogV1Dead,
+      disconnected: dogV1Dead,
+    },
+    actions: {},
+  },
+  {
+    id: "hippo-v1",
+    name: "Hippo v1",
+    frames: {
+      full: hippoV1Cheerful,
+      high: hippoV1Idle,
+      good: hippoV1Sit,
+      mid: hippoV1Tired,
+      low: hippoV1Weary,
+      tired: hippoV1Sleepy,
+      sleepy: hippoV1Sleep,
+      dead: hippoV1Dead,
+      disconnected: hippoV1Dead,
+    },
+    actions: {},
+  },
+  {
+    id: "chick-v1",
+    name: "Chick v1",
+    frames: {
+      full: chickV1Cheerful,
+      high: chickV1Idle,
+      good: chickV1Sit,
+      mid: chickV1Tired,
+      low: chickV1Weary,
+      tired: chickV1Sleepy,
+      sleepy: chickV1Sleep,
+      dead: chickV1Dead,
+      disconnected: chickV1Dead,
+    },
+    actions: {},
+  },
 ];
 
 export const ACCESSORIES = {
@@ -128,8 +214,8 @@ export const ACCESSORIES = {
   disconnectedSign: disconnectedSignPng,
 };
 
-// 옛 panda-v3 / cat-v1 / penguin-v1 / penguin-v2 삭제. 새 default 는 panda-v4.
-// 기존 사용자의 store 에 옛 id 가 저장돼 있어도 findSkin 의 fallback
+// 옛 panda-v3 / cat-v1 / penguin-v1 / penguin-v2 / dino-v1 삭제. 새 default 는
+// panda-v4. 기존 사용자의 store 에 옛 id 가 저장돼 있어도 findSkin 의 fallback
 // (SKINS[0]) 으로 자동 panda-v4 로 떨어진다.
 export const DEFAULT_SKIN_ID = "panda-v4";
 
