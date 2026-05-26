@@ -15,6 +15,8 @@ const {
   parseUsageData,
   buildBatchexecuteBody,
   buildBatchexecuteQuery,
+  parseCookieString,
+  mergeSetCookies,
   USAGE_RPC_ID,
   TIER_MAP,
 } = gemini;
@@ -243,5 +245,84 @@ describe("provider contract", () => {
   it("fetchUsage 에 빈 credentials 주면 즉시 throw (네트워크 호출 전)", async () => {
     await expect(gemini.fetchUsage({})).rejects.toThrow(/cookie/);
     await expect(gemini.fetchUsage(null)).rejects.toThrow(/cookie/);
+  });
+});
+
+describe("parseCookieString", () => {
+  it("순서 보존 + base64 value 의 `=` `/` 보존", () => {
+    const m = parseCookieString("a=1; SID=g.a0=x/y==; b=2");
+    expect(Array.from(m.keys())).toEqual(["a", "SID", "b"]);
+    expect(m.get("SID")).toBe("g.a0=x/y==");
+  });
+  it("빈/공백/잘못된 조각은 skip", () => {
+    const m = parseCookieString("  ; a=1 ;; =noname; b ");
+    expect(m.get("a")).toBe("1");
+    expect(m.has("b")).toBe(false); // `=` 없는 조각
+    expect(m.has("")).toBe(false); // 이름 없는 조각
+  });
+  it("null/undefined → 빈 Map", () => {
+    expect(parseCookieString(null).size).toBe(0);
+    expect(parseCookieString(undefined).size).toBe(0);
+  });
+});
+
+describe("mergeSetCookies — 회전 토큰 갱신", () => {
+  const current =
+    "SID=g.a0_keep; __Secure-1PSID=keep1; __Secure-1PSIDTS=sidts-OLD; " +
+    "SIDCC=AKEyXz-OLD; SAPISID=keepSAP";
+
+  it("기존 회전 키만 새 값으로 갱신, 인증 본체는 불변", () => {
+    const setCookies = [
+      "__Secure-1PSIDTS=sidts-NEW; Path=/; Secure; HttpOnly; SameSite=none",
+      "SIDCC=AKEyXz-NEW; Path=/; Secure",
+    ];
+    const { cookie, changed } = mergeSetCookies(current, setCookies);
+    expect(changed).toBe(true);
+    const m = parseCookieString(cookie);
+    expect(m.get("__Secure-1PSIDTS")).toBe("sidts-NEW");
+    expect(m.get("SIDCC")).toBe("AKEyXz-NEW");
+    expect(m.get("SID")).toBe("g.a0_keep"); // 인증 본체 그대로
+    expect(m.get("__Secure-1PSID")).toBe("keep1");
+    expect(m.get("SAPISID")).toBe("keepSAP");
+  });
+
+  it("현재 쿠키에 없는 키는 추가하지 않음 (bloat/오염 방지)", () => {
+    const { cookie, changed } = mergeSetCookies(current, [
+      "BRAND_NEW=zzz; Path=/",
+    ]);
+    expect(changed).toBe(false);
+    expect(parseCookieString(cookie).has("BRAND_NEW")).toBe(false);
+  });
+
+  it("빈 값(삭제 지시)은 무시 — 기존 값 클로버 안 함", () => {
+    const { cookie, changed } = mergeSetCookies(current, [
+      "__Secure-1PSIDTS=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/",
+    ]);
+    expect(changed).toBe(false);
+    expect(parseCookieString(cookie).get("__Secure-1PSIDTS")).toBe("sidts-OLD");
+  });
+
+  it("같은 값으로 다시 내려오면 changed=false", () => {
+    const { changed } = mergeSetCookies(current, [
+      "__Secure-1PSIDTS=sidts-OLD; Path=/",
+    ]);
+    expect(changed).toBe(false);
+  });
+
+  it("Set-Cookie 없음/비배열 → 정규화된 원본 그대로, changed=false", () => {
+    const normalized = Array.from(parseCookieString(current).entries())
+      .map(([k, v]) => `${k}=${v}`)
+      .join("; ");
+    expect(mergeSetCookies(current, []).changed).toBe(false);
+    expect(mergeSetCookies(current, null).changed).toBe(false);
+    expect(mergeSetCookies(current, undefined).cookie).toBe(normalized);
+  });
+
+  it("base64 value 의 `=`/`/` 가 들어간 SIDCC 갱신도 정확", () => {
+    const { cookie, changed } = mergeSetCookies("SIDCC=old==", [
+      "SIDCC=AKEyXz/New+v==; Path=/; Secure",
+    ]);
+    expect(changed).toBe(true);
+    expect(parseCookieString(cookie).get("SIDCC")).toBe("AKEyXz/New+v==");
   });
 });

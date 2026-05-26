@@ -403,6 +403,37 @@ async function pollPrepaid() {
   }
 }
 
+// provider 가 폴링 중 회전 토큰을 갱신했을 때 호출되는 콜백 (gemini 전용 사실상).
+// (1) in-memory apiConfig 를 새 쿠키로 갱신해 다음 폴이 fresh 쿠키를 쓰게 하고,
+// (2) store 의 활성 gemini 계정 cookie 를 write-back 해 재시작 후에도 유지한다.
+// store write 실패는 폴링을 막지 않는다(in-memory 갱신은 이미 적용됨).
+function persistRefreshedCredentials(refreshed) {
+  if (!apiConfig || !refreshed || !refreshed.cookie) return;
+  apiConfig.credentials = { ...apiConfig.credentials, cookie: refreshed.cookie };
+  try {
+    const cfg = store.op("get", "config.json", "accounts_config");
+    if (!cfg || !Array.isArray(cfg.accounts) || !cfg.activeAccountId) return;
+    let touched = false;
+    const accounts = cfg.accounts.map((a) => {
+      if (
+        a.id === cfg.activeAccountId &&
+        a.provider === "gemini" &&
+        a.cookie !== refreshed.cookie
+      ) {
+        touched = true;
+        return { ...a, cookie: refreshed.cookie };
+      }
+      return a;
+    });
+    if (touched) {
+      store.op("set", "config.json", "accounts_config", { ...cfg, accounts });
+      store.op("save", "config.json");
+    }
+  } catch (e) {
+    console.error("[tp] gemini 쿠키 store write-back 실패:", e && e.message ? e.message : e);
+  }
+}
+
 async function pollOnce() {
   // JSONL 파싱은 apiConfig 유무와 무관 — 사용자가 claude.ai 쿠키를 안 넣어도
   // 로컬 ~/.claude/projects 만 있으면 active_sessions / 5h·주간 토큰 / cache
@@ -414,7 +445,7 @@ async function pollOnce() {
   }
   const provider = providers.resolveProvider(apiConfig.provider);
   try {
-    latest = await provider.fetchUsage(apiConfig.credentials);
+    latest = await provider.fetchUsage(apiConfig.credentials, persistRefreshedCredentials);
     lastError = null;
     authPopupShown = false; // 다음 만료 사이클에서 다시 한 번 띄우게 reset
   } catch (err) {

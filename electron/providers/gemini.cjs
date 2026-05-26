@@ -195,6 +195,67 @@ function buildBatchexecuteBody(rpcId, atToken) {
   return params.toString();
 }
 
+// ─── 쿠키 회전 갱신 (pure, 테스트 대상) ─────────────────────────────────────
+//
+// Google 은 매 응답마다 `__Secure-1PSIDTS`/`__Secure-3PSIDTS`/`SIDCC`/
+// `__Secure-1PSIDCC`/`__Secure-3PSIDCC` 같은 회전 토큰을 Set-Cookie 로 새로
+// 내려준다. 브라우저는 이걸 자동 반영하지만 우리는 정적 스냅샷을 들고 있어
+// stale 되면 /app 이 로그아웃 페이지를 반환한다. 그래서 응답의 Set-Cookie 를
+// 현재 쿠키에 머지해 회전 토큰을 살려 둔다.
+
+// "a=1; b=2; c=3" → 순서 보존 Map(name → value). value 안의 `=`(base64) 보존.
+function parseCookieString(str) {
+  const map = new Map();
+  for (const part of String(str || "").split(";")) {
+    const s = part.trim();
+    if (!s) continue;
+    const eq = s.indexOf("=");
+    if (eq < 0) continue;
+    const name = s.slice(0, eq).trim();
+    if (!name) continue;
+    map.set(name, s.slice(eq + 1).trim());
+  }
+  return map;
+}
+
+// 현재 쿠키 문자열 + 응답 Set-Cookie 배열 → 머지된 쿠키 문자열 + 변경 여부.
+// 규칙: (1) Set-Cookie 의 `name=value`(첫 `;` 앞)만 본다. (2) *현재 쿠키에 이미
+// 있는 키만* 값 갱신 — 새 키 추가로 인한 bloat/오염 방지. (3) 빈 값(삭제 지시)은
+// 무시해 로그아웃 시 기존 값 클로버 방지.
+function mergeSetCookies(currentCookie, setCookieList) {
+  const map = parseCookieString(currentCookie);
+  let changed = false;
+  for (const sc of Array.isArray(setCookieList) ? setCookieList : []) {
+    if (typeof sc !== "string" || !sc) continue;
+    const first = sc.split(";")[0].trim();
+    const eq = first.indexOf("=");
+    if (eq < 0) continue;
+    const name = first.slice(0, eq).trim();
+    const value = first.slice(eq + 1).trim();
+    if (!name || !value) continue;
+    if (map.has(name) && map.get(name) !== value) {
+      map.set(name, value);
+      changed = true;
+    }
+  }
+  const cookie = Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
+  return { cookie, changed };
+}
+
+// 응답 헤더에서 Set-Cookie 배열을 안전하게 뽑는다 (undici Headers.getSetCookie).
+function readSetCookies(resp) {
+  try {
+    if (resp && resp.headers && typeof resp.headers.getSetCookie === "function") {
+      return resp.headers.getSetCookie();
+    }
+  } catch {
+    /* noop */
+  }
+  return [];
+}
+
 // batchexecute 의 query string 빌더. _reqid 는 호출자별 증가 카운터.
 function buildBatchexecuteQuery({ rpcId, buildLabel, sessionId, reqId, hl }) {
   const sp = new URLSearchParams();
@@ -265,7 +326,7 @@ async function fetchSessionTokens(cookie) {
       "WIZ_global_data 에 SNlM0e(at 토큰) 가 비어 있어요. 로그아웃 상태로 보입니다.",
     );
   }
-  return { at, bl, sid, cookie: ck };
+  return { at, bl, sid, cookie: ck, setCookies: readSetCookies(resp) };
 }
 
 let reqIdCounter = Math.floor(Math.random() * 9000) + 1000;
@@ -312,17 +373,38 @@ async function callUsageRpc({ cookie, at, bl, sid }) {
   if (!resp.ok) {
     throw new Error(`gemini batchexecute HTTP ${resp.status} — ${text.slice(0, 200).trim()}`);
   }
-  return decodeUsageResponse(text, USAGE_RPC_ID);
+  return { data: decodeUsageResponse(text, USAGE_RPC_ID), setCookies: readSetCookies(resp) };
 }
 
-async function fetchUsage(credentials) {
+// onRefresh?: (refreshed: { cookie }) => void — 회전 토큰이 갱신되면 호출.
+// main 이 in-memory apiConfig 갱신 + store write-back 에 쓴다. claude provider 는
+// 이 인자를 무시한다(회전 안 함).
+async function fetchUsage(credentials, onRefresh) {
   const c = credentials || {};
   if (!c.cookie || !String(c.cookie).trim()) {
     throw new Error("Gemini provider 자격증명에 cookie 가 비어 있습니다.");
   }
   const tokens = await fetchSessionTokens(c.cookie);
-  const inner = await callUsageRpc(tokens);
+  const { data: inner, setCookies: rpcSetCookies } = await callUsageRpc(tokens);
   const decoded = parseUsageData(inner);
+
+  // 두 응답(/app + batchexecute)의 Set-Cookie 를 현재 쿠키에 머지해 회전 토큰
+  // 갱신. 바뀌었으면 onRefresh 로 통지(통지 실패는 폴링을 막지 않음).
+  if (typeof onRefresh === "function") {
+    const allSet = [
+      ...(tokens.setCookies || []),
+      ...(rpcSetCookies || []),
+    ];
+    const { cookie: merged, changed } = mergeSetCookies(c.cookie, allSet);
+    if (changed) {
+      try {
+        onRefresh({ cookie: merged });
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
   return {
     provider: id,
     five_hour_pct: decoded.five_hour_pct,
@@ -349,6 +431,8 @@ module.exports = {
   parseUsageData,
   buildBatchexecuteBody,
   buildBatchexecuteQuery,
+  parseCookieString,
+  mergeSetCookies,
   USAGE_RPC_ID,
   TIER_MAP,
 };

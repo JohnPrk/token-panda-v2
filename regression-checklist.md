@@ -214,6 +214,7 @@
 - [ ] **WIZ scrape 실패 메시지**: Gemini 쿠키가 만료됐거나 SID 만 빠진 채로 저장하면 설정창 status 가 "쿠키 만료 또는 Google 로그아웃 상태" 류 한 줄로 표시 (응답 빈 페이지가 그대로 튀어나오지 않음)
 - [ ] **prepaid 미지원 가드**: Gemini 활성 계정 + trayMode="all"(5h+주간+$) 라도 prepaid 호출은 일어나지 않고 `$` 부분은 자동으로 빠짐 (provider.capabilities.prepaid=false 분기)
 - [ ] **테스트 회귀 없음**: `npm test` 의 frozen 케이스(claudeApi.test.mjs 12건, store.test.ts 13건) 가 모두 통과. 새 케이스 +45 (providers/gemini.test.mjs 29 + providers/index.test.mjs 10 + store.test.ts 신규 6)
+- [ ] **Gemini 쿠키 회전 자동 갱신 (v2.20+)**: Gemini 계정을 활성으로 두고 앱을 *오래 켜둬도*(수십 분~몇 시간) "SNlM0e 비어있음/로그아웃" 에러로 끊기지 않음. 매 폴링(30s)마다 응답 `Set-Cookie` 의 회전 토큰(`__Secure-1PSIDTS`/`SIDCC` 계열)이 저장 쿠키에 머지됨. 앱 재시작 후에도 직전 갱신된 쿠키로 곧장 연결(store write-back). 단, 앱을 수 시간 완전히 꺼두면 SIDTS 만료로 재-paste 필요(정상)
 
 ## 16. 업데이트 일지 + 업데이트 팝업 (v2.26+)
 
