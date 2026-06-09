@@ -2005,6 +2005,58 @@
 .account-form .field-hint strong {
   color: #5c4ecc;
 }
+/* 자격증명 직접 입력 토글 — 기본 접힘, 자동 가져오기가 주 경로. */
+.account-form .cred-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b4cff;
+  text-align: left;
+  background: rgba(107, 76, 255, 0.06);
+  border: 1px solid rgba(107, 76, 255, 0.18);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.account-form .cred-toggle:hover {
+  background: rgba(107, 76, 255, 0.1);
+}
+.account-form .cred-toggle-caret {
+  font-size: 9px;
+  opacity: 0.7;
+}
+.account-form .cred-toggle-badges {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.account-form .cred-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2e7d32;
+  background: rgba(46, 125, 50, 0.12);
+  border: 1px solid rgba(46, 125, 50, 0.25);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.account-form .cred-badge.cred-badge-api {
+  color: #b8651b;
+  background: rgba(184, 101, 27, 0.12);
+  border-color: rgba(184, 101, 27, 0.28);
+}
+.account-form .cred-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(107, 76, 255, 0.03);
+  border: 1px solid rgba(107, 76, 255, 0.12);
+  border-radius: 8px;
+}
 @media (prefers-color-scheme: dark) {
   .accounts-label { color: #aaa; }
   .account-tile-label { color: #ececf6; }
@@ -2032,6 +2084,28 @@
   }
   body:not(.settings-window-host) .account-form .field-hint strong {
     color: #b8a4ff;
+  }
+  body:not(.settings-window-host) .account-form .cred-toggle {
+    color: #b8a4ff;
+    background: rgba(155, 133, 255, 0.1);
+    border-color: rgba(155, 133, 255, 0.25);
+  }
+  body:not(.settings-window-host) .account-form .cred-toggle:hover {
+    background: rgba(155, 133, 255, 0.16);
+  }
+  body:not(.settings-window-host) .account-form .cred-badge {
+    color: #8be29a;
+    background: rgba(80, 200, 110, 0.14);
+    border-color: rgba(80, 200, 110, 0.3);
+  }
+  body:not(.settings-window-host) .account-form .cred-badge.cred-badge-api {
+    color: #e6b07a;
+    background: rgba(230, 176, 122, 0.14);
+    border-color: rgba(230, 176, 122, 0.32);
+  }
+  body:not(.settings-window-host) .account-form .cred-fields {
+    background: rgba(155, 133, 255, 0.05);
+    border-color: rgba(155, 133, 255, 0.16);
   }
 }
 

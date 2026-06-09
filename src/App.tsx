@@ -2038,14 +2038,23 @@ function AccountForm({
   const [platformCookie, setPlatformCookie] = useState(claudeExisting?.platformCookie ?? "");
   const [testStatus, setTestStatus] = useState<string>("");
   const [pasteMode, setPasteMode] = useState(false);
+  // 붙여넣기 캡처 대상 — "session"(claude.ai/Gemini 사용량 쿠키) vs
+  // "platform"(platform.claude.com 콘솔 쿠키). 안내문/placeholder/처리 분기에 쓴다.
+  const [pasteTarget, setPasteTarget] = useState<"session" | "platform">("session");
   const [pasteValue, setPasteValue] = useState("");
+  // 자격증명 직접 입력칸은 기본 접힘 — 자동 가져오기가 주 경로다. 가져온 값도
+  // 이 토글을 펴야 보인다(요청: "토글처럼 열어야 값이 보이도록").
+  const [showFields, setShowFields] = useState(false);
 
-  const autoCapture = async () => {
+  const autoCapture = async (target: "session" | "platform" = "session") => {
     setTestStatus("");
     setPasteValue("");
+    setPasteTarget(target);
     setPasteMode(true);
     try {
-      if (provider === "gemini") {
+      if (target === "platform") {
+        await invoke("open_claude_platform_in_browser");
+      } else if (provider === "gemini") {
         await invoke("open_gemini_usage_in_browser");
       } else {
         await invoke("open_claude_usage_in_browser");
@@ -2057,6 +2066,36 @@ function AccountForm({
 
   const handlePasteValue = async (raw: string) => {
     setPasteValue(raw);
+    if (pasteTarget === "platform") {
+      // platform.claude.com(Claude API 콘솔) 쿠키. claude.ai 와 별도 컨텍스트지만
+      // 둘 다 sessionKey 를 포함하므로 같은 가드를 쓴다. 쿠키는 그대로
+      // platformCookie 로 옮기고, 같은 쿠키로 콘솔 조직 uuid 를 best-effort 발견해
+      // platformOrgId 까지 채운다(실패해도 쿠키는 남는다).
+      if (!raw.includes("sessionKey=")) return;
+      setPlatformCookie(raw.trim());
+      setPasteMode(false);
+      setPasteValue("");
+      setTestStatus("Platform 쿠키를 가져왔어요. 조직 ID 확인 중…");
+      try {
+        const res = await invoke<{ org_id: string | null }>(
+          "discover_platform_org",
+          { cookie: raw.trim() },
+        );
+        if (res && res.org_id) {
+          setPlatformOrgId(res.org_id);
+          setTestStatus("Platform 쿠키 + 조직 ID를 자동으로 가져왔어요.");
+        } else {
+          setTestStatus(
+            "Platform 쿠키를 가져왔어요. 조직 ID는 자동 발견 못 해 비워뒀어요 (API 비용은 저장 후 자동 조회됩니다).",
+          );
+        }
+      } catch (e) {
+        setTestStatus(
+          `Platform 쿠키는 가져왔어요. 조직 ID 자동 발견 실패: ${String(e)}`,
+        );
+      }
+      return;
+    }
     if (provider === "gemini") {
       // Gemini 는 autoExtract 미지원 — 쿠키 한 줄을 그대로 cookie 필드로
       // 옮겨두기만 한다. main.cjs 의 capabilities.autoExtract=false 와 짝.
@@ -2188,6 +2227,12 @@ function AccountForm({
     });
   };
 
+  // 토글 배지 — 어떤 자격증명이 채워졌는지 펼치지 않고도 한눈에. 편집 모드의
+  // 기존 값에도 그대로 반영된다.
+  const sessionFilled = orgId.trim() !== "" && cookie.trim() !== "";
+  const apiFilled = platformCookie.trim() !== "";
+  const geminiFilled = cookie.trim() !== "";
+
   return (
     <div className="account-form">
       <div className="account-form-head">
@@ -2258,7 +2303,11 @@ function AccountForm({
       {pasteMode && (
         <div className="paste-capture">
           <div className="paste-capture-head">
-            <strong>Cookie 붙여넣기</strong>
+            <strong>
+              {pasteTarget === "platform"
+                ? "Platform Cookie 붙여넣기"
+                : "Cookie 붙여넣기"}
+            </strong>
             <button
               type="button"
               className="paste-capture-close"
@@ -2272,7 +2321,13 @@ function AccountForm({
               ✕
             </button>
           </div>
-          {provider === "gemini" ? (
+          {pasteTarget === "platform" ? (
+            <ol className="paste-capture-steps">
+              <li>방금 열린 <code>platform.claude.com</code> 탭에서 <code>⌘⌥I</code> → Network 탭</li>
+              <li><code>prepaid/credits</code> 또는 <code>usage_cost</code> 요청 → Headers → <code>cookie:</code> 한 줄 복사</li>
+              <li>아래 칸에 ⌘V로 붙여넣기 (쿠키 + 조직 ID 자동 처리)</li>
+            </ol>
+          ) : provider === "gemini" ? (
             <ol className="paste-capture-steps">
               <li>방금 열린 Gemini 탭에서 <code>⌘⌥I</code> → Network 탭</li>
               <li><code>batchexecute</code> 요청 (아무거나) → Headers → <code>cookie:</code> 한 줄 복사</li>
@@ -2288,7 +2343,9 @@ function AccountForm({
           <textarea
             autoFocus
             placeholder={
-              provider === "gemini"
+              pasteTarget === "platform"
+                ? "sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
+                : provider === "gemini"
                 ? "SID=...; __Secure-1PSID=...; __Secure-3PSID=...; SAPISID=...; __Secure-1PAPISID=...; __Secure-3PAPISID=..."
                 : "sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
             }
@@ -2299,89 +2356,131 @@ function AccountForm({
           />
         </div>
       )}
-      {provider === "claude" && (
-        <>
-          <label>
-            Organization ID
-            <input
-              type="text"
-              placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
-              value={orgId}
-              onChange={(e) => setOrgId(e.target.value)}
-              spellCheck={false}
-            />
-          </label>
-          <label>
-            세션 쿠키 (5개만)
-            <textarea
-              placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
-              value={cookie}
-              onChange={(e) => setCookie(e.target.value)}
-              rows={4}
-              spellCheck={false}
-            />
-          </label>
-          <label>
-            Platform Org UUID <span className="field-optional">(선택)</span>
-            <input
-              type="text"
-              placeholder="e25725d1-78db-40f8-a555-68593feb25bb"
-              value={platformOrgId}
-              onChange={(e) => setPlatformOrgId(e.target.value)}
-              spellCheck={false}
-            />
-            <span className="field-hint">
-              prepaid 잔액을 트레이 "5h+주간+$" 모드에서 보고 싶을 때만 채워주세요.
-              비워두면 prepaid 호출 자체를 안 합니다. 값은{" "}
-              <code>platform.claude.com/settings/billing</code> → DevTools → Network 탭의{" "}
-              <code>prepaid/credits</code> 요청 URL에서 추출.
-              <strong> claude.ai의 Org ID와 완전히 다른 UUID</strong>예요.
-            </span>
-          </label>
-          <label>
-            Platform Cookie <span className="field-optional">(선택)</span>
-            <textarea
-              placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
-              value={platformCookie}
-              onChange={(e) => setPlatformCookie(e.target.value)}
-              rows={3}
-              spellCheck={false}
-            />
-            <span className="field-hint">
-              위 Platform Org UUID로 호출했는데 <code>HTTP 403</code>이 떨어지면
-              채워주세요. <strong>platform.claude.com</strong>은 claude.ai와{" "}
-              <strong>별도 쿠키 컨텍스트</strong>예요. 같은{" "}
-              <code>platform.claude.com/settings/billing</code> 페이지의 DevTools →
-              Network 탭에서 <code>prepaid/credits</code> 요청 → Headers →{" "}
-              <code>cookie:</code> 한 줄 통째로 복사. 비워두면 위쪽 세션 쿠키를
-              그대로 시도합니다.
-            </span>
-          </label>
-        </>
-      )}
-      {provider === "gemini" && (
-        <label>
-          Gemini 쿠키 (한 줄 전체)
-          <textarea
-            placeholder="SID=g.a0...; __Secure-1PSID=...; __Secure-3PSID=...; SAPISID=...; __Secure-1PAPISID=...; __Secure-3PAPISID=..."
-            value={cookie}
-            onChange={(e) => setCookie(e.target.value)}
-            rows={5}
-            spellCheck={false}
-          />
-          <span className="field-hint">
-            <code>gemini.google.com</code> 에서 로그인된 상태로 DevTools → Network 탭 →
-            아무 <code>batchexecute</code> 요청 → Headers → <code>cookie:</code> 한 줄
-            통째로 복사해 붙여 넣어주세요. 최소{" "}
-            <code>SID / __Secure-1PSID / __Secure-3PSID / SAPISID / __Secure-1PAPISID
-            / __Secure-3PAPISID</code> 가 포함돼 있어야 호출이 통과합니다.
-          </span>
-        </label>
+      <button
+        type="button"
+        className="cred-toggle"
+        onClick={() => setShowFields((v) => !v)}
+        aria-expanded={showFields}
+      >
+        <span className="cred-toggle-caret" aria-hidden="true">
+          {showFields ? "▾" : "▸"}
+        </span>
+        <span className="cred-toggle-label">직접 입력 · 자격증명 확인</span>
+        <span className="cred-toggle-badges">
+          {provider === "claude" ? (
+            <>
+              {sessionFilled && <span className="cred-badge">세션 ✓</span>}
+              {apiFilled && (
+                <span className="cred-badge cred-badge-api">API ✓</span>
+              )}
+            </>
+          ) : (
+            geminiFilled && <span className="cred-badge">쿠키 ✓</span>
+          )}
+        </span>
+      </button>
+      {showFields && (
+        <div className="cred-fields">
+          {provider === "claude" && (
+            <>
+              <label>
+                Organization ID
+                <input
+                  type="text"
+                  placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
+                  value={orgId}
+                  onChange={(e) => setOrgId(e.target.value)}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                세션 쿠키 (5개만)
+                <textarea
+                  placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+                  value={cookie}
+                  onChange={(e) => setCookie(e.target.value)}
+                  rows={4}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                Platform Org UUID <span className="field-optional">(선택)</span>
+                <input
+                  type="text"
+                  placeholder="e25725d1-78db-40f8-a555-68593feb25bb"
+                  value={platformOrgId}
+                  onChange={(e) => setPlatformOrgId(e.target.value)}
+                  spellCheck={false}
+                />
+                <span className="field-hint">
+                  prepaid 잔액을 트레이 "5h+주간+$" 모드에서 보고 싶을 때만
+                  채워주세요. 비워두면 prepaid 호출 자체를 안 합니다. 값은{" "}
+                  <code>platform.claude.com/settings/billing</code> → DevTools →
+                  Network 탭의 <code>prepaid/credits</code> 요청 URL에서 추출.
+                  <strong> claude.ai의 Org ID와 완전히 다른 UUID</strong>예요.
+                  보통은 위 <strong>API 자동</strong>이 채워줍니다.
+                </span>
+              </label>
+              <label>
+                Platform Cookie <span className="field-optional">(선택)</span>
+                <textarea
+                  placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; lastActiveOrg=...; routingHint=..."
+                  value={platformCookie}
+                  onChange={(e) => setPlatformCookie(e.target.value)}
+                  rows={3}
+                  spellCheck={false}
+                />
+                <span className="field-hint">
+                  위 Platform Org UUID로 호출했는데 <code>HTTP 403</code>이
+                  떨어지면 채워주세요. <strong>platform.claude.com</strong>은
+                  claude.ai와 <strong>별도 쿠키 컨텍스트</strong>예요. 같은{" "}
+                  <code>platform.claude.com/settings/billing</code> 페이지의
+                  DevTools → Network 탭에서 <code>prepaid/credits</code> 요청 →
+                  Headers → <code>cookie:</code> 한 줄 통째로 복사. 비워두면 위쪽
+                  세션 쿠키를 그대로 시도합니다.
+                </span>
+              </label>
+            </>
+          )}
+          {provider === "gemini" && (
+            <label>
+              Gemini 쿠키 (한 줄 전체)
+              <textarea
+                placeholder="SID=g.a0...; __Secure-1PSID=...; __Secure-3PSID=...; SAPISID=...; __Secure-1PAPISID=...; __Secure-3PAPISID=..."
+                value={cookie}
+                onChange={(e) => setCookie(e.target.value)}
+                rows={5}
+                spellCheck={false}
+              />
+              <span className="field-hint">
+                <code>gemini.google.com</code> 에서 로그인된 상태로 DevTools →
+                Network 탭 → 아무 <code>batchexecute</code> 요청 → Headers →{" "}
+                <code>cookie:</code> 한 줄 통째로 복사해 붙여 넣어주세요. 최소{" "}
+                <code>SID / __Secure-1PSID / __Secure-3PSID / SAPISID /
+                __Secure-1PAPISID / __Secure-3PAPISID</code> 가 포함돼 있어야
+                호출이 통과합니다.
+              </span>
+            </label>
+          )}
+        </div>
       )}
       <div className="api-actions">
-        <button type="button" onClick={autoCapture}>
-          자동으로 가져오기
+        <button
+          type="button"
+          onClick={() => autoCapture("session")}
+          title="claude.ai 세션 쿠키(Org ID + 세션 쿠키)를 자동으로 가져옵니다."
+        >
+          {provider === "claude" ? "세션 자동" : "자동으로 가져오기"}
         </button>
+        {provider === "claude" && (
+          <button
+            type="button"
+            onClick={() => autoCapture("platform")}
+            title="platform.claude.com(Claude API 콘솔) 쿠키 + 조직 ID를 자동으로 가져옵니다."
+          >
+            API 자동
+          </button>
+        )}
         <button type="button" onClick={test}>
           테스트
         </button>

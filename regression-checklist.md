@@ -76,6 +76,8 @@
 - [ ] 활성 계정 전환 시 트레이 % / 펫 캐릭터 / 폴링 자격증명이 한 트랜잭션으로 동기화
 - [ ] 활성 계정 자격증명·skin 변경 시 메인 펫과 트레이 아이콘 즉시 반영
 - [ ] 단일 계정만 있는 기존 환경 → 자동 변환되어 첫 계정으로 등록 (legacy migration)
+- [ ] **(v2.23+) 자격증명 직접 입력 토글**: 계정 편집/추가 폼에서 입력칸(Org ID/세션 쿠키/Platform Org UUID/Platform Cookie)이 기본 접힘 → `▸ 직접 입력 · 자격증명 확인` 토글을 펴야 보인다. 값이 채워지면 펼치지 않아도 토글에 `세션 ✓`/`API ✓`(Gemini는 `쿠키 ✓`) 배지가 표시됨 (편집 모드의 기존 값에도 반영)
+- [ ] **(v2.23+) API 자동 가져오기**: Claude 계정 폼 하단 `API 자동` 버튼 → `platform.claude.com/settings/billing` 브라우저 오픈 → 그 쿠키 한 줄 붙여넣기 → Platform Cookie 채워지고 같은 쿠키로 콘솔 org UUID 자동 발견해 Platform Org UUID 까지 채움 (계정에 API org 없으면 쿠키만 채우고 안내 문구). 기존 `세션 자동` 은 claude.ai 쿠키 → Org ID + 세션 쿠키
 
 ## 9. 폴링·연결
 

@@ -58,6 +58,17 @@ async function fetchApiKeyCosts(credentials) {
   return claudeCosts.fetchApiKeyCosts(orgId, cookie);
 }
 
+// platform.claude.com (API 콘솔) 조직 uuid 를 쿠키 한 줄로 발견. 설정창 "API 자동"
+// 버튼 전용 — 사용자가 platform 쿠키를 붙여넣으면 같은 쿠키로 콘솔 조직 uuid 를
+// 채워준다(prepaid 가 claude.ai orgId 폴백으로는 안 통하므로 이 값이 있어야 정확).
+// 못 찾으면 null, 네트워크 오류는 throw (호출처가 "쿠키는 가져왔다" 로 분기).
+async function discoverPlatformOrg(cookie) {
+  if (!cookie) {
+    throw new Error("Platform 쿠키가 비어 있습니다.");
+  }
+  return claudeCosts.fetchPlatformOrgId(cookie);
+}
+
 async function autoExtract(rawCookie) {
   const r = await claudeApi.autoExtract(rawCookie);
   // claudeApi 는 { org_id, cookie } 모양으로 돌려준다 (snake_case 는 frontend
@@ -76,5 +87,6 @@ module.exports = {
   fetchUsage,
   fetchPrepaid,
   fetchApiKeyCosts,
+  discoverPlatformOrg,
   autoExtract,
 };

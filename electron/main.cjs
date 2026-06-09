@@ -770,6 +770,11 @@ async function handleCommand(cmd, a) {
     case "open_gemini_usage_in_browser":
       await shell.openExternal("https://gemini.google.com/usage");
       return null;
+    case "open_claude_platform_in_browser":
+      // 설정창 "API 자동" 버튼: platform.claude.com(Claude API 콘솔)을 연다.
+      // claude.ai 와 별도 쿠키 컨텍스트라 여기서 쿠키를 받아야 prepaid/비용을 읽는다.
+      await shell.openExternal("https://platform.claude.com/settings/billing");
+      return null;
     case "auto_extract_from_cookie": {
       // provider 인식형. a.provider 가 비어 있거나 claude 면 옛 동작
       // (claude.ai org_id 추출). gemini 는 autoExtract 미지원 (capability=false)
@@ -783,6 +788,18 @@ async function handleCommand(cmd, a) {
       // 옛 frontend 와의 호환: { org_id, cookie } snake_case 평탄 모양으로
       // 돌려줌 (claude provider 의 r.legacy 에 그 모양이 들어 있음).
       return r.legacy || r.credentials;
+    }
+    case "discover_platform_org": {
+      // 설정창 "API 자동" 버튼: 붙여넣은 platform.claude.com 쿠키로 API(콘솔)
+      // 조직 uuid 를 발견해 돌려준다. platform 은 Claude 전용 개념이라 claude
+      // provider 로 고정. 못 찾으면 org_id:null, 네트워크 오류는 throw → UI 가
+      // "쿠키는 가져왔지만 org 자동발견 실패" 로 안내한다.
+      const provider = providers.resolveProvider("claude");
+      if (typeof provider.discoverPlatformOrg !== "function") {
+        throw new Error("이 provider 는 platform 조직 자동 발견을 지원하지 않습니다.");
+      }
+      const orgId = await provider.discoverPlatformOrg(a.cookie);
+      return { org_id: orgId || null };
     }
     case "set_tray_title": {
       // 프론트가 formatTrayLabel 로 계산한 5h%/주간%/$ 라벨. macOS 는 setTitle 로
