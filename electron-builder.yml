@@ -11,9 +11,14 @@
 #   를 알아서 생성. 기존 src-tauri/icons/ 의 다양한 PNG 는 더 이상 필요 없음.
 
 appId: com.tnew.clauddeskpet
-# 빌드 후 바깥 .app 폴더명을 한글 "토큰 지키미.app"로 바꾼다(표시 이름용). productName/helper 는
-# ASCII 유지(한글이면 helper 경로 SIGTRAP). build/afterPack.cjs 주석 참고.
-afterPack: build/afterPack.cjs
+# 사용자가 보는 앱 이름은 한글 "토큰 지키미". 단 productName/helper 는 ASCII 유지
+# (한글이면 helper 경로 NFC/NFD mismatch 로 SIGTRAP). 한글 표시명은 *빌드 후 폴더
+# rename* 이 아니라 아래 dmg.contents[].name 으로 dmg 안에서만 바꾼다.
+#   ⚠️ v2.24.0(mac): afterPack 훅으로 TokenGuardian.app→한글 rename 했더니
+#   electron-builder 가 이후 서명·검증·dmg 단계에서 TokenGuardian.app 경로를 못
+#   찾아 "Application entry file ... does not exist" 로 빌드가 깨졌다. rename 을
+#   파이프라인에서 빼고 dmg 표시명만 바꾸는 방식으로 교체(공증 staple 은 .app
+#   내부에 있어 폴더명만 바뀌어도 무사).
 # productName 은 *파일시스템 식별자 + Electron 내부 helper 경로 lookup* 에
 # 쓰인다. Korean (NFC/NFD encoding mismatch) 이 들어가면 Electron 의
 # `electron_main_delegate_mac.mm` 가 Helper.app path 해석에서 SIGTRAP.
@@ -92,3 +97,15 @@ nsis:
 dmg:
   title: "토큰 지키미"
   artifactName: "token-panda_${version}_${arch}.${ext}"
+  # dmg 안의 .app 파일명을 한글로 표시 → 사용자가 /Applications 로 끌어다 놓으면
+  # "토큰 지키미.app" 로 설치된다. on-disk productName(TokenGuardian)·helper 는 ASCII
+  # 그대로라 SIGTRAP 회피. (DmgContent.name = dmg 내 파일명, 기본값은 path 의 basename)
+  contents:
+    - x: 130
+      y: 220
+      type: file
+      name: "토큰 지키미.app"
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
