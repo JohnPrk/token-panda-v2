@@ -28,12 +28,12 @@ function formatUpdateCheckLabel(lastUpdateCheck, updateInfo) {
   return `확인 실패 · ${hh}:${mm} 시도`;
 }
 
-// 트레이 메뉴 헤더 한 줄: "토큰 판다 v1.97.0 (03:18 확인)". 마지막 폴링 시각이
+// 트레이 메뉴 헤더 한 줄: "토큰 지키미 v1.97.0 (03:18 확인)". 마지막 폴링 시각이
 // 있으면 괄호로 붙여 한 줄에 통합한다. 폴링 전(lastUpdateCheck=null)이면 시각
 // 부분 생략. 폴링 성공/실패는 구분하지 않음 — 새 버전이 실제로 감지된 경우엔
 // 별도 "🆕 v.. 설치" 버튼이 헤더 바로 아래에 붙는 게 더 강한 신호 (v1.98).
 function formatHeaderLabel(appVersion, lastUpdateCheck) {
-  const base = `토큰 판다 v${appVersion}`;
+  const base = `토큰 지키미 v${appVersion}`;
   if (!lastUpdateCheck || !lastUpdateCheck.at) return base;
   const d = lastUpdateCheck.at;
   const hh = String(d.getHours()).padStart(2, "0");
@@ -66,7 +66,7 @@ function pickTrayTierForState(platform, trayMode, remaining) {
   return null;
 }
 
-// 펫 윈도우가 화면 끝(좌·상) 으로 못 가고 튕기던 회귀의 표준 해결책. 본 원인 두 개:
+// 지키미 윈도우가 화면 끝(좌·상) 으로 못 가고 튕기던 회귀의 표준 해결책. 본 원인 두 개:
 //
 //   1) macOS AppKit 의 NSWindow.constrainFrameRect(_:to:) 가 setBounds 마다
 //      윈도우를 NSScreen.visibleFrame 안으로 자동으로 끌어들인다(공식 문서:

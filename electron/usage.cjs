@@ -268,7 +268,7 @@ function scanFile(filePath, sinceMs, out) {
       const u = msg.usage;
       if (!u) continue;
       // Anthropic 청구 가중치: input/output/cache_creation 풀가 + cache_read ~0.1×.
-      // 청구 비율을 quota 근사로 미러링 — 펫 % 가 Claude UI % 와 ~5% 안 일치.
+      // 청구 비율을 quota 근사로 미러링 — 지키미 % 가 Claude UI % 와 ~5% 안 일치.
       const cacheRead = numOr0(u.cache_read_input_tokens);
       tokens =
         numOr0(u.input_tokens) +

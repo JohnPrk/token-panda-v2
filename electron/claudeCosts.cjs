@@ -1,5 +1,5 @@
 // Claude API 키별 월 비용 — platform.claude.com 의 console "비용" 컬럼을
-// 토큰 판다에서 보기 위한 모듈. claude.ai/usage 와 달리 콘솔은 두 요청을
+// 토큰 지키미에서 보기 위한 모듈. claude.ai/usage 와 달리 콘솔은 두 요청을
 // *별개로* 던지고 프론트가 key_id 로 조인해 비용 컬럼을 그린다(사용자가
 // network 에서 "바로 response 로 안 온다"고 관찰한 그 구조):
 //

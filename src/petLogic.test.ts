@@ -683,7 +683,7 @@ describe("hashHue — 결정론 / 안정성", () => {
   });
 });
 
-describe("clampScale (v1.70 펫 zoom)", () => {
+describe("clampScale (v1.70 지키미 zoom)", () => {
   it("범위 안의 값은 그대로 반환", () => {
     expect(clampScale(1.0)).toBe(1.0);
     expect(clampScale(0.8)).toBe(0.8);
@@ -712,7 +712,7 @@ describe("clampScale (v1.70 펫 zoom)", () => {
   });
 });
 
-describe("scaleFromDrag (v1.70 펫 zoom)", () => {
+describe("scaleFromDrag (v1.70 지키미 zoom)", () => {
   it("delta 0 이면 startScale 그대로", () => {
     expect(scaleFromDrag(1.0, 0)).toBe(1.0);
     expect(scaleFromDrag(0.8, 0)).toBe(0.8);

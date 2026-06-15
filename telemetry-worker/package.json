@@ -1,0 +1,17 @@
+{
+  "name": "tp-telemetry",
+  "private": true,
+  "version": "1.0.0",
+  "description": "token-panda 익명 사용 텔레메트리 Worker (Cloudflare Workers + D1)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "db:create": "wrangler d1 create tp-telemetry",
+    "db:schema": "wrangler d1 execute tp-telemetry --remote --file=./schema.sql",
+    "db:schema:local": "wrangler d1 execute tp-telemetry --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

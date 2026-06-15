@@ -1,11 +1,11 @@
-// macOS 전용: 펫 윈도우를 "모든 Space + 스와이프 전환에도 화면 고정" 으로.
+// macOS 전용: 지키미 윈도우를 "모든 Space + 스와이프 전환에도 화면 고정" 으로.
 //
-// 메뉴바처럼 데스크탑을 좌우로 넘겨도 펫의 x,y 가 안 밀리는 "한 겹 위 레이어" 느낌.
+// 메뉴바처럼 데스크탑을 좌우로 넘겨도 지키미의 x,y 가 안 밀리는 "한 겹 위 레이어" 느낌.
 // 핵심 메커니즘은 옛 Tauri 빌드(token-panda src-tauri/src/lib.rs)의 검증된 방식 그대로:
 //
 //   1) SkyLight 로 *별도 private Space* 를 만들고(SLSSpaceCreate) absolute level 100
 //      (= 유저의 좌우 Mission Control 스와이프 Space 집합 밖, 그 위)으로 올린다.
-//   2) 그 Space 를 항상 표시(SLSShowSpaces)하고, 펫 윈도우를 그 Space 로 이동
+//   2) 그 Space 를 항상 표시(SLSShowSpaces)하고, 지키미 윈도우를 그 Space 로 이동
 //      (SLSSpaceAddWindowsAndRemoveFromSpaces, 기존 Space 멤버십 7 비트 제거).
 //   3) 보조로 NSWindow.collectionBehavior(Stationary|...) + level 1500.
 //
@@ -51,7 +51,7 @@ const CLEAR_MASK =
 const SET_MASK =
   CB.STATIONARY | CB.FULLSCREEN_AUXILIARY | CB.IGNORES_CYCLE | CB.FULLSCREEN_DISALLOWS_TILING;
 
-// 펫 윈도우 level — main.cjs 의 setAlwaysOnTop(true, "screen-saver") 가 이미
+// 지키미 윈도우 level — main.cjs 의 setAlwaysOnTop(true, "screen-saver") 가 이미
 // Electron 내부적으로 NSScreenSaverWindowLevel(=1000) 로 매핑. 옛 코드에서
 // 추가로 CGAssistiveTechHighWindowLevel(1500) 까지 올렸던 이유는 "위쪽 진입
 // 차단 회피"였으나, 그 의도는 이제 enableLargerThanScreen:true + helpers.cjs
@@ -125,7 +125,7 @@ function nsWindowOf(win) {
   return msgSend(view, selReg("window"), 0);
 }
 
-// 펫 윈도우를 모든 Space + private elevated Space 로 고정. 실패해도 조용히 무시.
+// 지키미 윈도우를 모든 Space + private elevated Space 로 고정. 실패해도 조용히 무시.
 // windowNumber 가 0(창이 아직 화면에 안 올라옴)이면 false 반환 → 호출부가
 // lifecycle 시점마다 재시도한다.
 function pinPetToAllSpaces(win) {

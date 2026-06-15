@@ -18,8 +18,10 @@ import {
   cryptoRandomId,
   loadAccountsConfig,
   loadPlanConfig,
+  loadTelemetryOptOut,
   saveAccountsConfig,
   savePlanConfig,
+  saveTelemetryOptOut,
 } from "./store";
 import { ACCESSORIES, DEFAULT_SKIN_ID, SKINS, findSkin, type ActionName } from "./skins";
 import { CHANGELOG, entriesNewerThan } from "./changelog";
@@ -126,7 +128,7 @@ const REMAINING_THRESHOLDS: Array<[number, string]> = [
 // 3) PlanConfig.skin을 활성 계정의 skinId로 동기화 (Pet 컴포넌트가 여기서 그림)
 // 4) 트레이 메뉴 라벨/체크 표시 리빌드
 // 5) 즉시 새 자격증명으로 polling 한 번 (refresh_usage)
-// 6) `config-changed` emit → 메인 펫 윈도우가 새 plan 다시 읽음
+// 6) `config-changed` emit → 메인 지키미 윈도우가 새 plan 다시 읽음
 async function switchActiveAccount(next: AccountsConfig): Promise<void> {
   await saveAccountsConfig(next);
   const active = next.accounts.find((a) => a.id === next.activeAccountId);
@@ -173,7 +175,7 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
 }
 
 // 각 창은 자기 전용 HTML 진입점을 로드한다 (멀티페이지):
-//   index.html      → main.tsx          → <PetApp/>      (펫 패널, 라벨 "main")
+//   index.html      → main.tsx          → <PetApp/>      (지키미 패널, 라벨 "main")
 //   settings.html   → settings-main.tsx → <SettingsApp/> (라벨 "settings")
 //   onboarding.html → onboarding-main.tsx→ <OnboardingApp/> (라벨 "onboarding")
 //   preview.html    → preview-main.tsx  → <AnimPreviewApp/> (개발용 애니 프리뷰)
@@ -434,16 +436,16 @@ export function SkinGridApp() {
 
 export function PetApp() {
   // store IPC(plugin-store load)가 Windows WebView2에서 끝내 응답하지 않아도
-  // 펫이 무조건 보이도록 기본 설정으로 즉시 렌더하고, store가 resolve되면 실제
+  // 지키미가 무조건 보이도록 기본 설정으로 즉시 렌더하고, store가 resolve되면 실제
   // 설정으로 갱신한다. 옛 구조는 loading 게이트로 null을 그리다 store hang 시
-  // 영구 흰 화면이 됐고(메인 펫 윈도우는 라우팅과 무관하게 항상 PetApp), 그게
+  // 영구 흰 화면이 됐고(메인 지키미 윈도우는 라우팅과 무관하게 항상 PetApp), 그게
   // v1.74.1~.3 라우팅 수정과 별개인 흰 화면의 본 원인이었다.
   const [config, setConfig] = useState<PlanConfig>({
     plan: "max5x",
     limits: PLAN_PRESETS.max5x,
     skin: DEFAULT_SKIN_ID,
   });
-  // v1.70 펫 zoom 배율. PlanConfig.petScale 로 영속화. 드래그 중에는 setScale 만
+  // v1.70 지키미 zoom 배율. PlanConfig.petScale 로 영속화. 드래그 중에는 setScale 만
   // 호출해 즉시 시각 반영하고, pointerup 시점에 savePlanConfig 한 번 호출(드래그
   // 폭주 방지). disconnected 상태나 ResizeObserver 발화는 scale 변화의 자연
   // 부산물로만 일어남.
@@ -454,7 +456,7 @@ export function PetApp() {
 
     // 첫 설정 화면(온보딩) 안전망: loadPlanConfig/loadAccountsConfig가 Windows
     // WebView2에서 끝내 응답하지 않아도, 2초 안에 init이 settle 안 되면 온보딩을
-    // 띄운다. 펫 본체는 기본 config로 이미 렌더돼 있으므로 여기선 온보딩만.
+    // 띄운다. 지키미 본체는 기본 config로 이미 렌더돼 있으므로 여기선 온보딩만.
     const guard = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -477,7 +479,7 @@ export function PetApp() {
           const synced: PlanConfig = planCfg
             ? { ...planCfg, skin: active.skinId }
             : { plan: "max5x", limits: PLAN_PRESETS.max5x, skin: active.skinId };
-          // 설정부터 반영 — 아래 invoke/save가 Windows에서 hang해도 펫은 이미 떠 있다.
+          // 설정부터 반영 — 아래 invoke/save가 Windows에서 hang해도 지키미는 이미 떠 있다.
           setConfig(synced);
           setScale(clampScale(synced.petScale ?? PET_SCALE_DEFAULT));
 
@@ -512,7 +514,7 @@ export function PetApp() {
           return;
         }
 
-        // 계정이 비어 있는 첫 실행(또는 전부 삭제). 펫은 이미 기본 판다로 떠
+        // 계정이 비어 있는 첫 실행(또는 전부 삭제). 지키미는 이미 기본 판다로 떠
         // 있으니, 저장된 plan이 있으면 반영하고 첫 계정을 만들도록 온보딩을 띄운다.
         if (planCfg) {
           setConfig(planCfg);
@@ -535,7 +537,7 @@ export function PetApp() {
         }
       })
       .catch((e) => {
-        // store load 자체가 reject해도 펫은 이미 떠 있고, 첫 설정을 받도록 온보딩.
+        // store load 자체가 reject해도 지키미는 이미 떠 있고, 첫 설정을 받도록 온보딩.
         console.error("[pet] init failed:", e);
         if (settled) return;
         settled = true;
@@ -615,7 +617,7 @@ export function PetApp() {
     };
   }, []);
 
-  // Onboarding은 별도 윈도우(open_onboarding_window). 펫 패널은 항상 `config`로
+  // Onboarding은 별도 윈도우(open_onboarding_window). 지키미 패널은 항상 `config`로
   // 렌더 — config가 기본값으로 초기화돼 있어 첫 paint가 store IPC를 기다리지
   // 않는다(Windows에서 store가 hang해도 흰 화면이 안 됨).
   return (
@@ -722,6 +724,9 @@ export function OnboardingApp() {
   const [step, setStep] = useState<1 | 2>(1);
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
+  // 설정 폼과 통일 — Org ID/세션 쿠키 직접 입력은 토글 뒤로 접어둔다(기본 접힘).
+  // 자동 가져오기가 주 경로. 가져온 값도 펴야 보인다.
+  const [showFields, setShowFields] = useState(false);
 
   const autoCapture = async () => {
     setTestStatus("");
@@ -809,13 +814,15 @@ export function OnboardingApp() {
     await closeSelf();
   };
 
+  const sessionFilled = orgId.trim() !== "" && cookie.trim() !== "";
+
   return (
     <div className="onboarding-window">
       <div className="onboarding-card">
         <header className="onboarding-header">
-          <h1>토큰 판다에 오신 걸 환영해요 🎋</h1>
+          <h1>토큰 지키미에 오신 걸 환영해요 🎋</h1>
           <p className="onboarding-sub">
-            Claude의 가장 큰 단점은 토큰이 자주 부족하다는 것 — 토큰 판다는
+            Claude의 가장 큰 단점은 토큰이 자주 부족하다는 것 — 토큰 지키미는
             데스크톱 한 켠에 앉아 5시간/주간 잔량을 실시간으로 보여주고,
             <strong> 캐시가 끊기기 전에 미리 알려줘서 토큰을 아낄 수 있게</strong> 도와줍니다.
           </p>
@@ -917,42 +924,6 @@ export function OnboardingApp() {
               )}
             </div>
 
-            <div className="onboarding-howto">
-              <h3>① Org ID 가져오기</h3>
-              <ol>
-                <li>
-                  <a href="https://claude.ai/settings/account" target="_blank" rel="noreferrer">
-                    claude.ai/settings/account
-                  </a>
-                  에 접속합니다.
-                </li>
-                <li>"계정" 섹션의 <strong>조직 ID</strong> 값 복사
-                  <br />(예: <code>63e058d5-142c-4368-bca3-39d64d78b4f5</code>)</li>
-              </ol>
-
-              <h3>② 세션 쿠키 가져오기</h3>
-              <ol>
-                <li>
-                  <a href="https://claude.ai/settings/usage" target="_blank" rel="noreferrer">
-                    claude.ai/settings/usage
-                  </a>
-                  에 접속해 한 번 새로고침합니다.
-                </li>
-                <li>
-                  <code>⌘⌥I</code>로 개발자 도구 → <strong>Network</strong> 탭 열기
-                </li>
-                <li>
-                  목록에서 <code>usage</code> 요청을 클릭 → Headers 탭 →
-                  Request Headers의 <code>cookie:</code> 줄을 <strong>통째로</strong> 복사
-                </li>
-                <li>아래 칸에 그대로 붙여넣기</li>
-              </ol>
-              <p className="onboarding-howto-note">
-                실제로 쓰이는 쿠키는 5개(<code>sessionKey</code>, <code>cf_clearance</code>, <code>__cf_bm</code>, <code>_cfuvid</code>, <code>routingHint</code>)뿐이고
-                나머지는 무시됩니다. 그러니 한 줄을 통째로 복붙해도 안전해요.
-              </p>
-            </div>
-
             <label>
               계정 이름 (이 컴퓨터에서만 보임)
               <input
@@ -963,26 +934,81 @@ export function OnboardingApp() {
                 spellCheck={false}
               />
             </label>
-            <label>
-              Organization ID
-              <input
-                type="text"
-                placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
-                value={orgId}
-                onChange={(e) => setOrgId(e.target.value)}
-                spellCheck={false}
-              />
-            </label>
-            <label>
-              세션 쿠키
-              <textarea
-                placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
-                value={cookie}
-                onChange={(e) => setCookie(e.target.value)}
-                rows={4}
-                spellCheck={false}
-              />
-            </label>
+
+            <button
+              type="button"
+              className="cred-toggle"
+              onClick={() => setShowFields((v) => !v)}
+              aria-expanded={showFields}
+            >
+              <span className="cred-toggle-caret" aria-hidden="true">
+                {showFields ? "▾" : "▸"}
+              </span>
+              <span className="cred-toggle-label">직접 입력 · 자격증명 확인</span>
+              <span className="cred-toggle-badges">
+                {sessionFilled && <span className="cred-badge">세션 ✓</span>}
+              </span>
+            </button>
+            {showFields && (
+              <div className="cred-fields">
+                <div className="onboarding-howto">
+                  <h3>① Org ID 가져오기</h3>
+                  <ol>
+                    <li>
+                      <a href="https://claude.ai/settings/account" target="_blank" rel="noreferrer">
+                        claude.ai/settings/account
+                      </a>
+                      에 접속합니다.
+                    </li>
+                    <li>"계정" 섹션의 <strong>조직 ID</strong> 값 복사
+                      <br />(예: <code>63e058d5-142c-4368-bca3-39d64d78b4f5</code>)</li>
+                  </ol>
+
+                  <h3>② 세션 쿠키 가져오기</h3>
+                  <ol>
+                    <li>
+                      <a href="https://claude.ai/settings/usage" target="_blank" rel="noreferrer">
+                        claude.ai/settings/usage
+                      </a>
+                      에 접속해 한 번 새로고침합니다.
+                    </li>
+                    <li>
+                      <code>⌘⌥I</code>로 개발자 도구 → <strong>Network</strong> 탭 열기
+                    </li>
+                    <li>
+                      목록에서 <code>usage</code> 요청을 클릭 → Headers 탭 →
+                      Request Headers의 <code>cookie:</code> 줄을 <strong>통째로</strong> 복사
+                    </li>
+                    <li>아래 칸에 그대로 붙여넣기</li>
+                  </ol>
+                  <p className="onboarding-howto-note">
+                    실제로 쓰이는 쿠키는 5개(<code>sessionKey</code>, <code>cf_clearance</code>, <code>__cf_bm</code>, <code>_cfuvid</code>, <code>routingHint</code>)뿐이고
+                    나머지는 무시됩니다. 그러니 한 줄을 통째로 복붙해도 안전해요.
+                  </p>
+                </div>
+
+                <label>
+                  Organization ID
+                  <input
+                    type="text"
+                    placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5"
+                    value={orgId}
+                    onChange={(e) => setOrgId(e.target.value)}
+                    spellCheck={false}
+                  />
+                </label>
+                <label>
+                  세션 쿠키
+                  <textarea
+                    placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=...; _cfuvid=...; routingHint=[sk-ant-rh-...]"
+                    value={cookie}
+                    onChange={(e) => setCookie(e.target.value)}
+                    rows={4}
+                    spellCheck={false}
+                  />
+                </label>
+              </div>
+            )}
 
             <div className="onboarding-test-row">
               <button type="button" onClick={test}>
@@ -995,7 +1021,7 @@ export function OnboardingApp() {
               ⚠️ Org ID + 쿠키는 본인 claude.ai 세션의 자격증명입니다. 외부에
               유출되면 다른 사람이 사용량을 조회·소모할 수 있으니
               <strong>공유하지 마세요.</strong>
-              쿠키가 만료되면 토큰 판다가 자동으로 감지하고
+              쿠키가 만료되면 토큰 지키미가 자동으로 감지하고
               이 창을 다시 열어 새 쿠키를 요청합니다.
             </div>
 
@@ -1009,6 +1035,12 @@ export function OnboardingApp() {
             </div>
           </section>
         )}
+
+        <p className="onboarding-telemetry-note">
+          토큰 지키미는 익명 사용 통계(임의의 설치 ID · 앱 버전 · OS)만 수집해
+          얼마나 쓰이는지 파악합니다. 위 연동 정보(쿠키 · Org ID)는 포함되지도,
+          전송되지도 않아요. 설정에서 언제든 끌 수 있습니다.
+        </p>
       </div>
     </div>
   );
@@ -1128,7 +1160,7 @@ function Pet({
   const seenLastReqRef = useRef<string | null | "init">("init");
   const [refreshing, setRefreshing] = useState(false);
 
-  // 펫 윈도우 드래그: main 프로세스가 OS 커서(screen.getCursorScreenPoint) 를
+  // 지키미 윈도우 드래그: main 프로세스가 OS 커서(screen.getCursorScreenPoint) 를
   // 폴링해서 직접 setPosition. renderer 는 pointerdown 에 start_pet_drag,
   // pointerup 에 end_pet_drag 만 호출 — PointerEvent.screenX/Y 의 윈도우-이동
   // 중 desync 회피 + 다중 디스플레이 workArea 합집합 clamp 는 main 이 담당.
@@ -1496,11 +1528,11 @@ function Pet({
         )}
       </div>
         {/* resize 핸들 — .pet-content-inner 의 자식. 위치는 inner 우하단(= 캐릭터
-            발 옆) 이라 펫 따라 자연스럽게 이동하지만, counter-scale(1/scale + bottom right
+            발 옆) 이라 지키미 따라 자연스럽게 이동하지만, counter-scale(1/scale + bottom right
             origin)로 크기는 항상 일정. 2026-05-18 사용자 정정 두 번 반영. */}
         <div
           className="resize-handle"
-          title="드래그해서 펫 크기 조정"
+          title="드래그해서 지키미 크기 조정"
           aria-label="resize"
           style={{
             transform: scale === 1 ? undefined : `scale(${1 / scale})`,
@@ -1520,7 +1552,7 @@ function Pet({
 }
 
 // 활성 세션(마지막 assistant 응답이 5분 이내) 카드 stack. Rust 쪽 snapshot의
-// active_sessions를 그대로 받아 펫 윈도우 위쪽에 위에서 아래로 쌓는다. 0개면
+// active_sessions를 그대로 받아 지키미 윈도우 위쪽에 위에서 아래로 쌓는다. 0개면
 // 아무것도 그리지 않고, 1개여도 카드 1장을 띄운다 (사용자 명시).
 function SessionStack({
   sessions,
@@ -1777,6 +1809,16 @@ function Settings({
   // 폼 모드: null = 닫힘, "new" = 새 계정 추가, "<id>" = 그 계정 편집.
   const [formMode, setFormMode] = useState<null | "new" | string>(null);
   const [showHelp, setShowHelp] = useState(false);
+  // 익명 사용 통계 토글. config.json 의 telemetryOptOut 을 그대로 반영한다.
+  // 체크박스는 긍정형("보내기")이라 checked = !optOut.
+  const [telemetryOptOut, setTelemetryOptOut] = useState(false);
+  useEffect(() => {
+    loadTelemetryOptOut().then(setTelemetryOptOut);
+  }, []);
+  const updateTelemetryOptOut = async (next: boolean) => {
+    setTelemetryOptOut(next);
+    await saveTelemetryOptOut(next);
+  };
 
   const setActive = async (id: string) => {
     if (id === accounts.activeAccountId) return;
@@ -1918,6 +1960,22 @@ function Settings({
                 />
               );
             })()}
+        </div>
+
+        <div className="privacy-section">
+          <span className="accounts-label">개인정보</span>
+          <label className="telemetry-toggle">
+            <input
+              type="checkbox"
+              checked={!telemetryOptOut}
+              onChange={(e) => updateTelemetryOptOut(!e.target.checked)}
+            />{" "}
+            익명 사용 통계 보내기
+          </label>
+          <p className="api-note">
+            임의의 설치 ID · 앱 버전 · OS 만 수집해 얼마나 쓰이는지 파악하는 데
+            씁니다. 계정 연동 정보(쿠키 · Org ID)는 절대 포함되지 않아요.
+          </p>
         </div>
 
         <div className="settings-actions">

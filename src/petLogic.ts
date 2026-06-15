@@ -3,13 +3,13 @@ import type { PetState, PlanLimits, UsageSnapshot } from "./types";
 export const CACHE_TTL_MS = 5 * 60 * 1000;
 export const CACHE_NUDGE_AT_MS = 4 * 60 * 1000;
 
-// 펫 윈도우 zoom 배율 (v1.70+). 우하단 그립 드래그로 조정. 너무 작으면
+// 지키미 윈도우 zoom 배율 (v1.70+). 우하단 그립 드래그로 조정. 너무 작으면
 // 텍스트 가독성·캐릭터 표정이 다 깨지고, 너무 크면 화면 점유가 부담스러워
 // 사용자에게 의도된 폭만 허용한다.
 export const PET_SCALE_MIN = 0.6;
-// v1.70 초기엔 1.8 까지 허용했으나 max 근처에서 펫이 너무 커져 카드 stack
+// v1.70 초기엔 1.8 까지 허용했으나 max 근처에서 지키미가 너무 커져 카드 stack
 // 과 resize 핸들이 화면 상단 메뉴바 위로 잘리는 회귀가 확인됨(2026-05-18
-// 사용자 보고). 일반 디스플레이에서 카드+핸들+펫 본체가 모두 가시 영역
+// 사용자 보고). 일반 디스플레이에서 카드+핸들+지키미 본체가 모두 가시 영역
 // 안에 들어오는 안전한 상한이 약 1.5.
 export const PET_SCALE_MAX = 1.5;
 export const PET_SCALE_DEFAULT = 1.0;

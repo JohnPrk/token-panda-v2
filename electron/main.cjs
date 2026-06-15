@@ -1,6 +1,6 @@
-// 토큰 판다 — Electron 메인 프로세스 (MVP).
+// 토큰 지키미 — Electron 메인 프로세스 (MVP).
 // 구 Tauri 백엔드(src-tauri/src/lib.rs)의 MVP 표면을 포팅:
-//   - 펫/설정/온보딩 BrowserWindow
+//   - 지키미/설정/온보딩 BrowserWindow
 //   - 시스템 트레이 + 메뉴
 //   - claude.ai usage 30초 폴링 → usage-update 브로드캐스트
 //   - 프론트엔드가 호출하는 IPC 커맨드 + 창 간 이벤트 중계
@@ -12,6 +12,7 @@ const providers = require("./providers/index.cjs");
 const createStore = require("./store.cjs");
 const updater = require("./updater.cjs");
 const installer = require("./installer.cjs");
+const telemetry = require("./telemetry.cjs");
 const spaces = require("./spaces.cjs");
 const usage = require("./usage.cjs");
 const {
@@ -28,7 +29,7 @@ app.setName("token-panda");
 // 트레이/로그 표시는 package.json 의 앱 버전을 직접 읽는다 (빌드 신선도 확인용).
 const APP_VERSION = require("../package.json").version;
 
-// 단일 인스턴스: 두 번째 실행은 기존 펫을 띄우고 종료.
+// 단일 인스턴스: 두 번째 실행은 기존 지키미를 띄우고 종료.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
@@ -122,7 +123,7 @@ function createPetWindow() {
     hasShadow: false,
     // macOS Sequoia(15.x) 의 Window Tiling 은 focusable 윈도우를 화면 끝으로
     // 가져갈 때 잿빛 "tile hint zone" 미리보기를 그리고 윈도우를 reposition
-    // 한다. 펫은 사용자 키보드 포커스 안 가져오는 보조 윈도우라 focusable:false
+    // 한다. 지키미는 사용자 키보드 포커스 안 가져오는 보조 윈도우라 focusable:false
     // 로 OS 타일링 대상에서 제외 — clawd-on-desk 와 동일한 패턴. 텍스트 입력은
     // 별도 settings/onboarding BrowserWindow 가 담당해서 영향 없음.
     focusable: false,
@@ -157,10 +158,10 @@ function createPetWindow() {
   // 효과 보존.
   petWin.setAlwaysOnTop(true, "screen-saver");
   // 모든 Space + 스와이프 전환에도 화면 고정(Stationary) 으로 — 메뉴바처럼 데스크탑을
-  // 넘겨도 펫의 x,y 가 안 밀리는 "한 겹 위 레이어" 느낌. Electron 내장
+  // 넘겨도 지키미의 x,y 가 안 밀리는 "한 겹 위 레이어" 느낌. Electron 내장
   // setVisibleOnAllWorkspaces 는 CanJoinAllSpaces 만 켜서 전환 때 같이 밀리므로,
   // spaces.cjs 가 koffi FFI 로 NSWindow.collectionBehavior 에 Stationary 까지 박는다.
-  // 펫 윈도우에만 적용 — 설정/온보딩 창은 일반 BrowserWindow 라 포커스 회귀와 무관.
+  // 지키미 윈도우에만 적용 — 설정/온보딩 창은 일반 BrowserWindow 라 포커스 회귀와 무관.
   // sticky 태그는 NSWindow.windowNumber 가 유효(창이 화면에 올라온 뒤)해야 박힌다.
   // 생성 직후엔 0 일 수 있어 lifecycle 시점마다 재시도한다.
   spaces.pinPetToAllSpaces(petWin);
@@ -187,7 +188,7 @@ function openSettings() {
     minWidth: 520,
     minHeight: 560,
     resizable: true,
-    title: "토큰 판다 — 설정",
+    title: "토큰 지키미 — 설정",
     icon: ICON,
     autoHideMenuBar: true,
     webPreferences: webPrefs("settings"),
@@ -213,7 +214,7 @@ function openOnboarding() {
     minHeight: 620,
     resizable: true,
     center: true,
-    title: "토큰 판다 — 시작하기",
+    title: "토큰 지키미 — 시작하기",
     icon: ICON,
     autoHideMenuBar: true,
     webPreferences: webPrefs("onboarding"),
@@ -246,7 +247,7 @@ function openChangelog(mode, sinceVersion) {
     minHeight: 420,
     resizable: true,
     center: true,
-    title: "토큰 판다 — 업데이트 일지",
+    title: "토큰 지키미 — 업데이트 일지",
     icon: ICON,
     autoHideMenuBar: true,
     webPreferences: webPrefs("changelog"),
@@ -275,7 +276,7 @@ function openMonthlyUsage() {
     minHeight: 420,
     resizable: true,
     center: true,
-    title: "토큰 판다 — 월별 API 사용량",
+    title: "토큰 지키미 — 월별 API 사용량",
     icon: ICON,
     autoHideMenuBar: true,
     webPreferences: webPrefs("usage"),
@@ -287,18 +288,16 @@ function openMonthlyUsage() {
   });
 }
 
-// 부팅 시 "방금 업데이트됨" 팝업. config.json 의 changelogLastSeenVersion 과 현재
-// 버전을 비교해 새 버전이면 일지 창을 whatsnew 모드로 띄운다. 신규 설치(저장값 없음)
-// 는 팝업 없이 baseline 만 기록 — 첫 실행에 일지가 튀어나오지 않게.
+// 부팅 시 버전 baseline 기록. 옛날엔 새 버전이면 "방금 업데이트됨" 일지 팝업을
+// 자동으로 띄웠으나(openChangelog("whatsnew", …)), 사용자 요청으로 자동 팝업은
+// 제거 — 업데이트마다 창이 튀어나오는 게 거슬려서. 변경로그는 트레이 "업데이트
+// 일지" 메뉴로 언제든 수동 확인 가능. baseline 기록만 남겨 둔다(updater 비교용).
 function maybeShowWhatsNew() {
   let lastSeen = null;
   try {
     lastSeen = store.op("get", "config.json", "changelogLastSeenVersion") || null;
   } catch {
     lastSeen = null;
-  }
-  if (updater.shouldShowWhatsNew(lastSeen, APP_VERSION)) {
-    openChangelog("whatsnew", lastSeen);
   }
   if (lastSeen !== APP_VERSION) {
     try {
@@ -316,7 +315,7 @@ function broadcast(event, payload) {
   }
 }
 
-// 펫 윈도우 드래그 — main 이 OS 커서(screen.getCursorScreenPoint)를 ~60fps 로
+// 지키미 윈도우 드래그 — main 이 OS 커서(screen.getCursorScreenPoint)를 ~60fps 로
 // 폴링해서 setPosition. 종전 PointerEvent.screenX/Y 기반 renderer 드래그를
 // 대체. 이유:
 //   1) PointerEvent.screenX/Y 는 같은 프레임에 윈도우가 setPosition 으로
@@ -534,20 +533,32 @@ async function handleInstallClick() {
   }
 }
 
+// 업데이트 체크 옆에서 익명 텔레메트리 핑을 한 발(fire-and-forget). sendPing 은
+// 절대 throw 하지 않지만, 프라미스 거부 경고 방지로 .catch 만 달아둔다. 엔드포인트
+// 미설정/ opt-out 이면 내부에서 no-op.
+function sendTelemetryPing() {
+  telemetry
+    .sendPing(store, { version: APP_VERSION, os: process.platform })
+    .catch(() => {});
+}
+
 // 부팅 3초 후 + 1시간 주기. anonymous GitHub API 가 60 req/hr 이라 1회/hr 면 안전.
+// 텔레메트리 핑도 같은 주기에 묶어 보낸다(업데이트 체크와는 별개 요청).
 function startUpdateChecker() {
   setTimeout(() => {
     checkLatestRelease().catch((e) => console.warn("[tp] update check failed:", e));
+    sendTelemetryPing();
   }, 3000);
   if (updateTimer) clearInterval(updateTimer);
   updateTimer = setInterval(() => {
     checkLatestRelease().catch((e) => console.warn("[tp] update check failed:", e));
+    sendTelemetryPing();
   }, 60 * 60 * 1000);
 }
 
 function rebuildTray() {
   if (!tray) return;
-  // 헤더 한 줄에 버전 + 마지막 폴링 시각 통합 (v1.98): "토큰 판다 v1.97.0 (03:18 확인)".
+  // 헤더 한 줄에 버전 + 마지막 폴링 시각 통합 (v1.98): "토큰 지키미 v1.97.0 (03:18 확인)".
   // 평시엔 이 한 줄 + 메뉴 항목들만. 새 버전이 감지되면 헤더 바로 아래에
   // "🆕 v.. 설치" 버튼 하나만 붙음 (중간 "있음" 라인 폐기 — 헤더의 시각이 폴링
   // 동작 확인 신호를 이미 줌).
@@ -566,7 +577,7 @@ function rebuildTray() {
   template.push(
     { type: "separator" },
     {
-      label: "펫 보이기/숨기기",
+      label: "지키미 보이기/숨기기",
       click: () => {
         if (!petWin) return;
         if (petWin.isVisible()) petWin.hide();
@@ -649,7 +660,7 @@ function applyTrayIcon() {
 function createTray() {
   const init = defaultTrayImage();
   tray = new Tray(init.isEmpty() ? nativeImage.createEmpty() : init);
-  tray.setToolTip("토큰 판다");
+  tray.setToolTip("토큰 지키미");
   tray.on("click", () => tray.popUpContextMenu());
   applyTrayIcon();
   rebuildTray();
@@ -808,7 +819,7 @@ async function handleCommand(cmd, a) {
       const t = a.title ? String(a.title).trim() : "";
       if (tray) {
         if (process.platform === "darwin") tray.setTitle(t);
-        tray.setToolTip(`토큰 판다  ${t}`.trim());
+        tray.setToolTip(`토큰 지키미  ${t}`.trim());
       }
       return null;
     }
@@ -934,7 +945,7 @@ app.whenReady().then(() => {
   createPetWindow();
   startPoller();
   startUpdateChecker();
-  // 펫이 먼저 뜬 뒤 잠깐 있다가 "방금 업데이트됨" 일지 팝업 (있을 때만).
+  // 지키미가 먼저 뜬 뒤 잠깐 있다가 "방금 업데이트됨" 일지 팝업 (있을 때만).
   setTimeout(() => {
     try {
       maybeShowWhatsNew();

@@ -20,7 +20,6 @@ import hamsterV2Sleepy from "./skins/hamster-v2/sleepy.png";
 import hamsterV2Sleep from "./skins/hamster-v2/sleep.png";
 import hamsterV2Dead from "./skins/hamster-v2/dead.png";
 import hamsterV2Sit from "./skins/hamster-v2/sit.png";
-import hamsterV2RunGif from "./skins/hamster-v2/run.gif"; // 정면으로 달려오는 런 모션(256² 투명 루프)
 
 // cat-v2 — 회색+크림 고양이(오드아이 파/주, 분홍 귀/코). Gemini 9 포즈 시트
 // (3×3, 흰 배경 2048²) 의 3행 중간(중복 dead 변형)을 흰색으로 마스킹해 8 포즈
@@ -156,7 +155,7 @@ export const SKINS: Skin[] = [
       dead: hamsterV2Dead,
       disconnected: hamsterV2Dead,
     },
-    actions: { run: hamsterV2RunGif },
+    actions: {},
   },
   {
     id: "dog-v1",

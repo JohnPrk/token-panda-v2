@@ -1,0 +1,12 @@
+name = "tp-telemetry"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# D1 바인딩. database_id 는 `wrangler d1 create tp-telemetry` 실행 후 출력값으로 채운다.
+[[d1_databases]]
+binding = "DB"
+database_name = "tp-telemetry"
+database_id = "019248c5-7217-4bdd-b271-e4c161609200"
+
+# /stats 보호용 토큰은 시크릿으로 주입:  wrangler secret put STATS_TOKEN
+# (env 에 평문으로 두지 말 것)

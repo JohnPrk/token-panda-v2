@@ -1014,6 +1014,16 @@
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
+/* 첫 실행 텔레메트리 고지 — 두 단계 모두에서 항상 보이도록 카드 푸터에 둔다.
+   경고가 아니라 정보 안내라 노란 보안 박스와 달리 차분한 회색 본문체. */
+.onboarding-telemetry-note {
+  font-size: 10.5px;
+  color: #8a8594;
+  line-height: 1.5;
+  margin: 4px 2px 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
 .onboarding-actions {
   display: flex;
   justify-content: flex-end;
@@ -1817,6 +1827,25 @@
   font-size: 11px;
   color: #555;
 }
+.privacy-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.telemetry-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* 설정 카드의 `input { width: 100% }`(2 classes)을 이기려면 더 구체적인
+   셀렉터로 체크박스만 auto 폭으로 되돌린다. */
+.settings-window .settings .telemetry-toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
 .account-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
@@ -2056,6 +2085,54 @@
   background: rgba(107, 76, 255, 0.03);
   border: 1px solid rgba(107, 76, 255, 0.12);
   border-radius: 8px;
+}
+/* 온보딩(시작하기) 창은 항상 다크 테마 — 같은 토글 구조에 다크 톤. */
+.onboarding-window .cred-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9b8ff;
+  text-align: left;
+  background: rgba(155, 133, 255, 0.12);
+  border: 1px solid rgba(155, 133, 255, 0.3);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.onboarding-window .cred-toggle:hover {
+  background: rgba(155, 133, 255, 0.2);
+}
+.onboarding-window .cred-toggle-caret {
+  font-size: 10px;
+  opacity: 0.75;
+}
+.onboarding-window .cred-toggle-badges {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.onboarding-window .cred-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8be29a;
+  background: rgba(80, 200, 110, 0.16);
+  border: 1px solid rgba(80, 200, 110, 0.32);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.onboarding-window .cred-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(155, 133, 255, 0.2);
+  border-radius: 10px;
 }
 @media (prefers-color-scheme: dark) {
   .accounts-label { color: #aaa; }

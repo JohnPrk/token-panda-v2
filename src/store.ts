@@ -5,6 +5,9 @@ const STORE_FILE = "config.json";
 const KEY_PLAN = "plan_config";
 const KEY_API = "api_config";          // legacy single-account credential blob
 const KEY_ACCOUNTS = "accounts_config";
+// 익명 사용 통계 opt-out 플래그. electron/telemetry.cjs 가 같은 config.json 의
+// 같은 평면 키(OPT_OUT_KEY)를 읽으므로 이 문자열은 양쪽이 일치해야 한다.
+const KEY_TELEMETRY_OPT_OUT = "telemetryOptOut";
 
 let storePromise: Promise<Store> | null = null;
 function getStore() {
@@ -21,6 +24,21 @@ export async function loadPlanConfig(): Promise<PlanConfig | null> {
 export async function savePlanConfig(cfg: PlanConfig): Promise<void> {
   const store = await getStore();
   await store.set(KEY_PLAN, cfg);
+  await store.save();
+}
+
+// 익명 사용 통계 opt-out 읽기/쓰기. 기본값은 opt-in(false = 수집 켜짐) — 백엔드와
+// 동일하게 명시적으로 true 일 때만 꺼진 것으로 본다. 메인 프로세스가 단일 store
+// 인스턴스를 들고 있어, 여기서 저장하면 다음 핑 주기에 telemetry.cjs 가 곧장 반영.
+export async function loadTelemetryOptOut(): Promise<boolean> {
+  const store = await getStore();
+  const v = await store.get<boolean>(KEY_TELEMETRY_OPT_OUT);
+  return v === true;
+}
+
+export async function saveTelemetryOptOut(optOut: boolean): Promise<void> {
+  const store = await getStore();
+  await store.set(KEY_TELEMETRY_OPT_OUT, optOut);
   await store.save();
 }
 
