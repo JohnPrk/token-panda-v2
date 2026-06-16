@@ -2216,18 +2216,26 @@ function Settings({
 
         <div className="privacy-section">
           <span className="accounts-label">개인정보</span>
-          <label className="telemetry-toggle">
-            <input
-              type="checkbox"
-              checked={!telemetryOptOut}
-              onChange={(e) => updateTelemetryOptOut(!e.target.checked)}
-            />{" "}
-            익명 사용 통계 보내기
-          </label>
-          <p className="api-note">
-            임의의 설치 ID · 앱 버전 · OS 만 수집해 얼마나 쓰이는지 파악하는 데
-            씁니다. 계정 연동 정보(쿠키 · Org ID)는 절대 포함되지 않아요.
-          </p>
+          {/* 아래 "우클릭 메뉴에 표시할 항목" 카드(.menu-toggle-accordion)와 같은
+              밝은 둥근 영역 안에 토글 1행 + 설명을 담아 톤을 맞춘다. 행·라벨·스위치·
+              설명 모두 그 카드와 동일 클래스를 재사용(추가 CSS 없음). */}
+          <div className="menu-toggle-accordion">
+            <label className="menu-toggle-row">
+              <span className="menu-toggle-label">익명 사용 통계 보내기</span>
+              <span className="tp-switch">
+                <input
+                  type="checkbox"
+                  checked={!telemetryOptOut}
+                  onChange={(e) => updateTelemetryOptOut(!e.target.checked)}
+                />
+                <span className="tp-slider" />
+              </span>
+            </label>
+            <p className="menu-toggle-caption">
+              임의의 설치 ID · 앱 버전 · OS 만 수집해 얼마나 쓰이는지 파악하는 데
+              씁니다. 계정 연동 정보(쿠키 · Org ID)는 절대 포함되지 않아요.
+            </p>
+          </div>
         </div>
 
         <div className="pet-behavior-section">
