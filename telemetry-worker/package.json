@@ -2,8 +2,10 @@
   "name": "tp-telemetry",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "description": "token-panda 익명 사용 텔레메트리 Worker (Cloudflare Workers + D1)",
   "scripts": {
+    "test": "vitest run",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
@@ -12,6 +14,7 @@
     "db:schema:local": "wrangler d1 execute tp-telemetry --local --file=./schema.sql"
   },
   "devDependencies": {
+    "vitest": "^4.1.9",
     "wrangler": "^3"
   }
 }
