@@ -466,6 +466,50 @@
   user-select: none;
   z-index: 2;
 }
+
+/* 처음 시작 시 1회 뜨는 계정 전환 안내 말풍선. 보라 accent 톤 + 우상단 X.
+   bubble-stack 의 마지막 자식이라 .bubble 기본 꼬리(::after)가 펫을 가리킨다. */
+.bubble.switch-hint {
+  position: relative;
+  background: #f1ecff;
+  border-color: #c9bcff;
+  color: #4a3aa8;
+  padding: 7px 22px 7px 10px;
+  max-width: 180px;
+  line-height: 1.35;
+}
+.bubble-stack > .bubble.switch-hint:last-child::after {
+  border-top-color: #f1ecff;
+}
+.switch-hint-text {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.switch-hint-text b {
+  color: #6b4cff;
+}
+.switch-hint-x {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8a7bd8;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.switch-hint-x:hover {
+  background: rgba(107, 76, 255, 0.14);
+  color: #4a3aa8;
+}
 .character img {
   position: absolute;
   inset: 0;
@@ -2243,13 +2287,13 @@
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: nwse-resize;
-  border-radius: 6px;
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(60, 50, 80, 0.22);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
@@ -2266,16 +2310,18 @@
   background: rgba(255, 255, 255, 1);
   transform: scale(1.06);
 }
+/* 유니코드 글리프(⤡)는 시스템 폰트마다 모양이 들쭉날쭉이라, 대각 양방향 화살표를
+   인라인 SVG 로 직접 그린다(currentColor 라 hover 색 변화도 그대로 반영). */
 .resize-icon {
-  font-size: 13px;
-  line-height: 1;
-  font-weight: 800;
-  color: rgba(60, 50, 80, 0.7);
-  /* macOS 기본 폰트에서도 ↘ 가 또렷이 보이도록 굵게 + 약간의 그림자 */
-  text-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(60, 50, 80, 0.72);
   pointer-events: none;
-  display: inline-block;
-  transform: translate(0.5px, 0.5px);
+}
+.resize-icon svg {
+  display: block;
+  filter: drop-shadow(0 0.5px 0 rgba(255, 255, 255, 0.7));
 }
 .resize-handle:hover .resize-icon,
 .resize-handle:active .resize-icon {

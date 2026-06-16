@@ -16,12 +16,15 @@ import type {
 import { PLAN_PRESETS } from "./types";
 import {
   cryptoRandomId,
+  isDoubleTap,
   loadAccountsConfig,
   loadPlanConfig,
+  loadSwitchHintDismissed,
   loadTelemetryOptOut,
   nextActiveAccountId,
   saveAccountsConfig,
   savePlanConfig,
+  saveSwitchHintDismissed,
   saveTelemetryOptOut,
 } from "./store";
 import { ACCESSORIES, DEFAULT_SKIN_ID, SKINS, findSkin, type ActionName } from "./skins";
@@ -461,6 +464,9 @@ export function PetApp() {
   // 활성 계정 라벨 표시 + 더블클릭 순환 전환에 쓰는 계정 묶음. init 과
   // config-changed 에서 갱신한다(다른 창의 계정 추가/삭제/전환도 따라옴).
   const [accounts, setAccounts] = useState<AccountsConfig | null>(null);
+  // 계정 전환 안내 말풍선: 처음 시작 시 1회만. 기본 true(=닫힘)로 두어 로드 전
+  // 깜빡임을 막고, store 에서 미닫힘 확인되면 false 로 풀어 노출한다.
+  const [switchHintDismissed, setSwitchHintDismissed] = useState(true);
 
   useEffect(() => {
     let settled = false;
@@ -565,6 +571,13 @@ export function PetApp() {
     return () => clearTimeout(guard);
   }, []);
 
+  // 계정 전환 안내 말풍선을 이미 닫았는지 store 에서 1회 로드.
+  useEffect(() => {
+    loadSwitchHintDismissed()
+      .then(setSwitchHintDismissed)
+      .catch(() => setSwitchHintDismissed(true));
+  }, []);
+
   // 설정창 등 다른 윈도우가 PlanConfig 를 변경하면 petScale 도 다시 가져온다.
   useEffect(() => {
     const un = listen("config-changed", async () => {
@@ -654,6 +667,14 @@ export function PetApp() {
   const activeLabel =
     accounts?.accounts.find((a) => a.id === accounts.activeAccountId)?.label ??
     null;
+  // 계정 2개 이상 + 아직 안 닫음 → 처음 시작 안내 말풍선 노출. 1개면 전환 무의미.
+  const canSwitchAccount = (accounts?.accounts.length ?? 0) >= 2;
+  const showSwitchHint = canSwitchAccount && !switchHintDismissed;
+
+  const dismissSwitchHint = () => {
+    setSwitchHintDismissed(true);
+    saveSwitchHintDismissed(true).catch(() => {});
+  };
 
   // Onboarding은 별도 윈도우(open_onboarding_window). 지키미 패널은 항상 `config`로
   // 렌더 — config가 기본값으로 초기화돼 있어 첫 paint가 store IPC를 기다리지
@@ -663,7 +684,9 @@ export function PetApp() {
       config={config}
       scale={scale}
       activeLabel={activeLabel}
+      showSwitchHint={showSwitchHint}
       onCycleAccount={cycleAccount}
+      onDismissSwitchHint={dismissSwitchHint}
       onScaleChange={setScale}
       onScaleCommit={async (next) => {
         setScale(next);
@@ -1183,14 +1206,18 @@ function Pet({
   config,
   scale,
   activeLabel,
+  showSwitchHint,
   onCycleAccount,
+  onDismissSwitchHint,
   onScaleChange,
   onScaleCommit,
 }: {
   config: PlanConfig;
   scale: number;
   activeLabel: string | null;
+  showSwitchHint: boolean;
   onCycleAccount: () => void;
+  onDismissSwitchHint: () => void;
   onScaleChange: (next: number) => void;
   onScaleCommit: (next: number) => void;
 }) {
@@ -1225,6 +1252,21 @@ function Pet({
     if (!draggingRef.current) return;
     draggingRef.current = false;
     invoke("end_pet_drag").catch(() => {});
+  };
+
+  // 펫 본체 더블클릭 = 다음 계정 순환. NSPanel 에선 onClick/onDoubleClick DOM
+  // 이벤트가 안 잡혀(드래그·리사이즈가 전부 pointer), pointerup 두 번의 간격으로
+  // 더블탭을 직접 판정한다(isDoubleTap). 같은 자리에서 빠르게 두 번 = 전환.
+  const lastPetTapRef = useRef(0);
+  const onCharacterPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const t = Date.now();
+    if (isDoubleTap(lastPetTapRef.current, t)) {
+      lastPetTapRef.current = 0;
+      onCycleAccount();
+    } else {
+      lastPetTapRef.current = t;
+    }
   };
 
   useEffect(() => {
@@ -1547,6 +1589,26 @@ function Pet({
             monthlyResetMs={d.petState === "disconnected" ? null : d.monthlyResetMs}
           />
         )}
+        {showSwitchHint && (
+          // 처음 시작 시 1회 안내 말풍선. X(pointerup)로 닫으면 다시 안 뜸.
+          // bubble-stack 의 마지막 자식이라 꼬리(::after)가 펫을 가리킨다.
+          <div className="bubble switch-hint">
+            <button
+              type="button"
+              className="switch-hint-x"
+              title="닫기"
+              onPointerUp={(e) => {
+                e.stopPropagation();
+                onDismissSwitchHint();
+              }}
+            >
+              ×
+            </button>
+            <span className="switch-hint-text">
+              🐾 펫을 <b>더블클릭</b>하면 계정이 바뀌어요
+            </span>
+          </div>
+        )}
       </div>
 
       <div
@@ -1564,12 +1626,7 @@ function Pet({
           e.preventDefault();
           triggerRefresh();
         }}
-        onDoubleClick={(e) => {
-          // 왼쪽 더블클릭 = 다음 계정으로 순환 전환(계정 2개 이상일 때).
-          // preventDefault 로 drag-region 더블클릭의 OS 기본 동작(zoom 등) 차단.
-          e.preventDefault();
-          onCycleAccount();
-        }}
+        onPointerUp={onCharacterPointerUp}
       >
         <img
           src={characterSrc}
@@ -1639,7 +1696,22 @@ function Pet({
           onPointerUp={onHandlePointerUp}
           onPointerCancel={onHandlePointerUp}
         >
-          <span className="resize-icon" aria-hidden>↘</span>
+          <span className="resize-icon" aria-hidden>
+            <svg
+              viewBox="0 0 12 12"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="0.95"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M1.5 1.5 L10.5 10.5" />
+              <path d="M1.5 1.5 L3.8 1.5 M1.5 1.5 L1.5 3.8" />
+              <path d="M10.5 10.5 L8.2 10.5 M10.5 10.5 L10.5 8.2" />
+            </svg>
+          </span>
         </div>
         </div>
       </div>

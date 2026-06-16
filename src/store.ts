@@ -8,6 +8,8 @@ const KEY_ACCOUNTS = "accounts_config";
 // 익명 사용 통계 opt-out 플래그. electron/telemetry.cjs 가 같은 config.json 의
 // 같은 평면 키(OPT_OUT_KEY)를 읽으므로 이 문자열은 양쪽이 일치해야 한다.
 const KEY_TELEMETRY_OPT_OUT = "telemetryOptOut";
+// 계정 전환(펫 더블클릭) 안내 말풍선을 한 번 닫았는지. true 면 다시 안 띄운다.
+const KEY_SWITCH_HINT_DISMISSED = "accountSwitchHintDismissed";
 
 let storePromise: Promise<Store> | null = null;
 function getStore() {
@@ -39,6 +41,19 @@ export async function loadTelemetryOptOut(): Promise<boolean> {
 export async function saveTelemetryOptOut(optOut: boolean): Promise<void> {
   const store = await getStore();
   await store.set(KEY_TELEMETRY_OPT_OUT, optOut);
+  await store.save();
+}
+
+// 계정 전환 안내 말풍선을 닫은 적 있는지(처음 시작 시 1회만 노출하기 위함).
+export async function loadSwitchHintDismissed(): Promise<boolean> {
+  const store = await getStore();
+  const v = await store.get<boolean>(KEY_SWITCH_HINT_DISMISSED);
+  return v === true;
+}
+
+export async function saveSwitchHintDismissed(dismissed: boolean): Promise<void> {
+  const store = await getStore();
+  await store.set(KEY_SWITCH_HINT_DISMISSED, dismissed);
   await store.save();
 }
 
@@ -146,4 +161,19 @@ export function nextActiveAccountId(
   const idx = ids.indexOf(currentId ?? "");
   const nextIdx = idx < 0 ? 0 : (idx + 1) % ids.length;
   return ids[nextIdx];
+}
+
+// 펫 NSPanel 에선 onClick/dblclick DOM 이벤트가 안 잡혀(드래그·리사이즈가 전부
+// pointer 이벤트), 더블클릭을 pointerup 두 번의 간격으로 직접 판정한다.
+// prevTapMs=0(첫 탭)이거나 간격이 thresholdMs 이상이면 false. 순수 함수라 테스트.
+export const DOUBLE_TAP_MS = 400;
+
+export function isDoubleTap(
+  prevTapMs: number,
+  nowMs: number,
+  thresholdMs: number = DOUBLE_TAP_MS,
+): boolean {
+  if (prevTapMs <= 0) return false;
+  const dt = nowMs - prevTapMs;
+  return dt >= 0 && dt < thresholdMs;
 }

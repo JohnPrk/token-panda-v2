@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildAccountsConfigFromLegacy,
   cryptoRandomId,
+  isDoubleTap,
   nextActiveAccountId,
 } from "./store";
 import type { AccountsConfig, ApiConfig, GeminiAccount, PlanConfig } from "./types";
@@ -324,5 +325,30 @@ describe("nextActiveAccountId — 펫 더블클릭 계정 순환", () => {
   it("활성 id 가 목록에 없으면(삭제 등) 첫 계정", () => {
     expect(nextActiveAccountId(["a", "b", "c"], "zzz")).toBe("a");
     expect(nextActiveAccountId(["a", "b"], null)).toBe("a");
+  });
+});
+
+describe("isDoubleTap — 펫 pointer 기반 더블탭 판정", () => {
+  it("threshold 안의 두 번째 탭은 true", () => {
+    expect(isDoubleTap(1000, 1200)).toBe(true); // 200ms
+    expect(isDoubleTap(1000, 1399)).toBe(true); // 399ms < 400
+  });
+
+  it("threshold 이상이면 false (느린 두 번째 탭)", () => {
+    expect(isDoubleTap(1000, 1400)).toBe(false); // 정확히 400
+    expect(isDoubleTap(1000, 2000)).toBe(false);
+  });
+
+  it("첫 탭(prev=0)은 항상 false", () => {
+    expect(isDoubleTap(0, 1200)).toBe(false);
+  });
+
+  it("음수 간격(시계 역행)은 false", () => {
+    expect(isDoubleTap(2000, 1000)).toBe(false);
+  });
+
+  it("커스텀 threshold 적용", () => {
+    expect(isDoubleTap(1000, 1250, 200)).toBe(false);
+    expect(isDoubleTap(1000, 1150, 200)).toBe(true);
   });
 });
