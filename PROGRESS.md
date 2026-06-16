@@ -7,7 +7,7 @@
 
 ## 0. 작업 컨텍스트 (지금이 어디인가)
 
-- **레포**: https://github.com/JohnPrk/token-panda-v2 (public, default branch `main`)
+- **레포**: https://github.com/JohnPrk/token-guardians (public, default branch `main`)
 - **원본 레포** (Releases 폴링 대상): https://github.com/JohnPrk/token-panda
 - **현재 코드 버전**: `1.75.0` (`package.json`)
 - **CI**: `.github/workflows/release.yml` 이 `v*.*.*` 태그 push 시 macOS + Windows 양 OS 빌드 → **Latest** Release 자동 생성 (`releaseDraft: false`)
