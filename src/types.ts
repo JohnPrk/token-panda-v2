@@ -1,4 +1,4 @@
-export type ProviderId = "claude" | "gemini";
+export type ProviderId = "claude" | "gemini" | "codex";
 
 export type ApiUsage = {
   /** 어느 provider 가 만든 스냅샷인지. legacy(undefined) 면 claude 로 간주. */
@@ -8,8 +8,14 @@ export type ApiUsage = {
   five_hour_resets_at: string | null;
   weekly_resets_at: string | null;
   fetched_at: string;
-  /** Gemini 가 채우는 요금제 라벨 (PRO / ULTRA / PLUS). 다른 provider 는 미사용. */
+  /** Gemini 가 채우는 요금제 라벨 (PRO / ULTRA / PLUS), Codex 는 plan_type
+   *  (Free / Plus / Pro …). 다른 provider 는 미사용. */
   tier?: string;
+  /** Codex(OpenAI) 전용. 무료 플랜은 5h/주간 대신 월간 한도만 노출하고,
+   *  Plus/Pro 는 5h+주간이 채워지고 월간은 비는 경우가 많다. 다른 provider 는
+   *  미사용 — undefined 면 표시하지 않는다. */
+  monthly_pct?: number;
+  monthly_resets_at?: string | null;
 };
 
 /** platform.claude.com 의 prepaid 잔액. dollars 단위(소수점 둘째자리). usage
@@ -154,11 +160,27 @@ export type GeminiAccount = {
   platformCookie?: undefined;
 };
 
-export type Account = ClaudeAccount | GeminiAccount;
+export type CodexAccount = {
+  id: string;
+  label: string;
+  skinId: string;
+  provider: "codex";
+  /** codex 는 로컬 ~/.codex/sessions 의 rollout 로그를 읽어 자격증명이 전혀
+   *  없다. 아래는 ClaudeAccount 와 같은 키 union 호환용 phantom 필드로, 런타임에
+   *  항상 undefined 다 (`account.cookie` 류 접근이 TS 에서 끊기지 않도록). */
+  orgId?: undefined;
+  cookie?: undefined;
+  platformOrgId?: undefined;
+  platformCookie?: undefined;
+};
+
+export type Account = ClaudeAccount | GeminiAccount | CodexAccount;
 
 /** Account 의 provider 를 정규화. legacy(undefined) → "claude". */
 export function accountProvider(a: Account): ProviderId {
-  return a.provider === "gemini" ? "gemini" : "claude";
+  if (a.provider === "gemini") return "gemini";
+  if (a.provider === "codex") return "codex";
+  return "claude";
 }
 
 export type AccountsConfig = {

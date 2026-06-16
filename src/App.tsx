@@ -19,6 +19,7 @@ import {
   loadAccountsConfig,
   loadPlanConfig,
   loadTelemetryOptOut,
+  nextActiveAccountId,
   saveAccountsConfig,
   savePlanConfig,
   saveTelemetryOptOut,
@@ -35,6 +36,7 @@ import {
   derive,
   formatResetCountdown,
   formatTrayLabel,
+  formatTrayLabelMonthly,
   hashHue,
   scaleFromDrag,
 } from "./petLogic";
@@ -147,6 +149,12 @@ async function switchActiveAccount(next: AccountsConfig): Promise<void> {
       await invoke("set_api_config", {
         provider: "gemini",
         credentials: { cookie: active.cookie },
+      }).catch(() => {});
+    } else if (active.provider === "codex") {
+      // codex 는 자격증명이 없다 — 로컬 ~/.codex 로그만 읽는다.
+      await invoke("set_api_config", {
+        provider: "codex",
+        credentials: {},
       }).catch(() => {});
     } else {
       await invoke("set_api_config", {
@@ -450,6 +458,9 @@ export function PetApp() {
   // 폭주 방지). disconnected 상태나 ResizeObserver 발화는 scale 변화의 자연
   // 부산물로만 일어남.
   const [scale, setScale] = useState<number>(PET_SCALE_DEFAULT);
+  // 활성 계정 라벨 표시 + 더블클릭 순환 전환에 쓰는 계정 묶음. init 과
+  // config-changed 에서 갱신한다(다른 창의 계정 추가/삭제/전환도 따라옴).
+  const [accounts, setAccounts] = useState<AccountsConfig | null>(null);
 
   useEffect(() => {
     let settled = false;
@@ -467,6 +478,7 @@ export function PetApp() {
       .then(([planCfg, accCfg]) => {
         settled = true;
         clearTimeout(guard);
+        setAccounts(accCfg);
 
         const active = accCfg.accounts.find(
           (a) => a.id === accCfg.activeAccountId,
@@ -487,6 +499,11 @@ export function PetApp() {
             invoke("set_api_config", {
               provider: "gemini",
               credentials: { cookie: active.cookie },
+            }).catch(() => {});
+          } else if (active.provider === "codex") {
+            invoke("set_api_config", {
+              provider: "codex",
+              credentials: {},
             }).catch(() => {});
           } else {
             invoke("set_api_config", {
@@ -568,6 +585,8 @@ export function PetApp() {
     const un = listen("config-changed", async () => {
       const cfg = await loadPlanConfig();
       if (cfg) setConfig(cfg);
+      // 계정 추가/삭제/전환(트레이·설정창·더블클릭 어디서든)을 라벨 표시에 반영.
+      setAccounts(await loadAccountsConfig());
     });
     return () => {
       un.then((fn) => fn());
@@ -617,6 +636,25 @@ export function PetApp() {
     };
   }, []);
 
+  // 펫 본체 더블클릭 = 다음 계정으로 순환 전환. switchActiveAccount 헬퍼가
+  // 저장·자격증명 푸시·skin·트레이·config-changed emit 까지 한 트랜잭션으로
+  // 처리한다(트레이 "계정 전환" 과 같은 경로). 계정 1개 이하면 no-op.
+  const cycleAccount = async () => {
+    const accCfg = await loadAccountsConfig();
+    const targetId = nextActiveAccountId(
+      accCfg.accounts.map((a) => a.id),
+      accCfg.activeAccountId,
+    );
+    if (!targetId) return;
+    const next: AccountsConfig = { ...accCfg, activeAccountId: targetId };
+    await switchActiveAccount(next);
+    setAccounts(next);
+  };
+
+  const activeLabel =
+    accounts?.accounts.find((a) => a.id === accounts.activeAccountId)?.label ??
+    null;
+
   // Onboarding은 별도 윈도우(open_onboarding_window). 지키미 패널은 항상 `config`로
   // 렌더 — config가 기본값으로 초기화돼 있어 첫 paint가 store IPC를 기다리지
   // 않는다(Windows에서 store가 hang해도 흰 화면이 안 됨).
@@ -624,6 +662,8 @@ export function PetApp() {
     <Pet
       config={config}
       scale={scale}
+      activeLabel={activeLabel}
+      onCycleAccount={cycleAccount}
       onScaleChange={setScale}
       onScaleCommit={async (next) => {
         setScale(next);
@@ -1142,11 +1182,15 @@ export function ChangelogApp() {
 function Pet({
   config,
   scale,
+  activeLabel,
+  onCycleAccount,
   onScaleChange,
   onScaleCommit,
 }: {
   config: PlanConfig;
   scale: number;
+  activeLabel: string | null;
+  onCycleAccount: () => void;
   onScaleChange: (next: number) => void;
   onScaleCommit: (next: number) => void;
 }) {
@@ -1272,12 +1316,21 @@ function Pet({
     const mode: TrayMode = config.trayMode ?? "fivehour";
     const prepaid =
       d.petState === "disconnected" ? null : snap?.prepaid?.dollars ?? null;
-    const title = formatTrayLabel(mode, five, weekly, prepaid);
+    // Codex 무료 플랜(월간 단독)은 5h/주간 윈도우가 없으므로 mode 와 무관하게
+    // 월간 잔량%만 라벨로, 트레이 아이콘 단계도 월간 잔량으로 구동한다.
+    const title = d.monthlyOnly
+      ? formatTrayLabelMonthly(d.petState === "disconnected" ? 0 : d.monthlyRemaining)
+      : formatTrayLabel(mode, five, weekly, prepaid);
+    const iconRemaining = d.monthlyOnly
+      ? d.petState === "disconnected" ? 0 : d.monthlyRemaining
+      : five;
     invoke("set_tray_title", { title }).catch(() => {});
-    invoke("set_tray_icon_for_remaining", { remaining: five }).catch(() => {});
+    invoke("set_tray_icon_for_remaining", { remaining: iconRemaining }).catch(() => {});
   }, [
     d.fiveHourRemaining,
     d.weeklyRemaining,
+    d.monthlyOnly,
+    d.monthlyRemaining,
     d.petState,
     config.trayMode,
     snap?.prepaid?.dollars,
@@ -1288,6 +1341,24 @@ function Pet({
   useEffect(() => {
     if (!snap) return;
     if (d.petState === "disconnected") return;
+    if (d.monthlyOnly) {
+      // Codex 무료 플랜: 5h/주간 윈도우가 없어 그 값들이 0 이라, 일반 경로를 타면
+      // "5시간/주간 소진" 오탐이 뜬다. 월간 한도 잔량으로만 배터리식 알림을 쏜다.
+      for (const [t] of REMAINING_THRESHOLDS) {
+        if (d.monthlyRemaining <= t) {
+          const pct = Math.round(d.monthlyRemaining * 100);
+          maybeNotify({
+            key: `monthly-${t}`,
+            title: t === 0 ? `월간 한도 소진` : `월간 한도 ${pct}% 남음`,
+            body:
+              t === 0
+                ? `월간 한도가 리셋될 때까지 사용 불가입니다.`
+                : `이번 달 남은 한도가 ${pct}% 입니다.`,
+          });
+        }
+      }
+      return;
+    }
     for (const [t] of REMAINING_THRESHOLDS) {
       if (d.fiveHourRemaining <= t) {
         const pct = Math.round(d.fiveHourRemaining * 100);
@@ -1316,7 +1387,14 @@ function Pet({
       const elapsed = Date.parse(snap.now) - Date.parse(snap.last_request_at);
       if (elapsed > 5 * 3600_000) resetThreshold("5h-");
     }
-  }, [d.fiveHourRemaining, d.weeklyRemaining, d.petState, snap]);
+  }, [
+    d.fiveHourRemaining,
+    d.weeklyRemaining,
+    d.monthlyOnly,
+    d.monthlyRemaining,
+    d.petState,
+    snap,
+  ]);
 
   const skin = findSkin(config.skin);
 
@@ -1464,6 +1542,9 @@ function Pet({
             weeklyRemaining={d.petState === "disconnected" ? 0 : d.weeklyRemaining}
             fiveResetMs={d.petState === "disconnected" ? null : d.fiveHourResetMs}
             weeklyResetMs={d.petState === "disconnected" ? null : d.weeklyResetMs}
+            monthlyOnly={d.monthlyOnly}
+            monthlyRemaining={d.petState === "disconnected" ? 0 : d.monthlyRemaining}
+            monthlyResetMs={d.petState === "disconnected" ? null : d.monthlyResetMs}
           />
         )}
       </div>
@@ -1482,6 +1563,12 @@ function Pet({
           // refresh ping is visible.
           e.preventDefault();
           triggerRefresh();
+        }}
+        onDoubleClick={(e) => {
+          // 왼쪽 더블클릭 = 다음 계정으로 순환 전환(계정 2개 이상일 때).
+          // preventDefault 로 drag-region 더블클릭의 OS 기본 동작(zoom 등) 차단.
+          e.preventDefault();
+          onCycleAccount();
         }}
       >
         <img
@@ -1527,6 +1614,15 @@ function Pet({
           </div>
         )}
       </div>
+      {activeLabel && (
+        <div
+          className="account-tag"
+          data-tauri-drag-region
+          title={`활성 계정: ${activeLabel} · 펫 더블클릭으로 계정 전환`}
+        >
+          {activeLabel}
+        </div>
+      )}
         {/* resize 핸들 — .pet-content-inner 의 자식. 위치는 inner 우하단(= 캐릭터
             발 옆) 이라 지키미 따라 자연스럽게 이동하지만, counter-scale(1/scale + bottom right
             origin)로 크기는 항상 일정. 2026-05-18 사용자 정정 두 번 반영. */}
@@ -1617,12 +1713,38 @@ function UsageBubble({
   weeklyRemaining,
   fiveResetMs,
   weeklyResetMs,
+  monthlyOnly,
+  monthlyRemaining,
+  monthlyResetMs,
 }: {
   fiveRemaining: number;
   weeklyRemaining: number;
   fiveResetMs: number | null;
   weeklyResetMs: number | null;
+  monthlyOnly: boolean;
+  monthlyRemaining: number;
+  monthlyResetMs: number | null;
 }) {
+  // Codex 무료 플랜은 5h/주간 윈도우가 없으므로(둘 다 0%) 그 두 줄을 띄우면
+  // "다 소진된" 것처럼 오해된다. 월간 한도 한 줄만 보여준다.
+  if (monthlyOnly) {
+    return (
+      <div className="bubble usage" data-tauri-drag-region>
+        <div className="usage-row" data-tauri-drag-region>
+          <span className="usage-label" data-tauri-drag-region>월간</span>
+          <span
+            className={`usage-pct ${toneOf(monthlyRemaining)}`}
+            data-tauri-drag-region
+          >
+            {pad(Math.round(monthlyRemaining * 100))}%
+          </span>
+          <span className="usage-reset" data-tauri-drag-region>
+            {monthlyResetMs !== null ? formatResetCountdown(monthlyResetMs) : "—"}
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="bubble usage" data-tauri-drag-region>
       <div className="usage-row" data-tauri-drag-region>
@@ -2008,7 +2130,11 @@ function AccountCard({
   // 4자리(`…b4f5`), Gemini 는 provider 라벨(`Gemini`) 자체. 두 경우 모두 짧은
   // 한 줄로 만들어 카드 폭을 안 늘림.
   const orgTail =
-    account.provider === "gemini" ? "Gemini" : (account.orgId ?? "").slice(-4);
+    account.provider === "gemini"
+      ? "Gemini"
+      : account.provider === "codex"
+        ? "Codex"
+        : (account.orgId ?? "").slice(-4);
   // 카드 본체 클릭의 의미를 상태별로 갈라준다. 활성 카드를 또 활성화시키는
   // 건 무의미하니, 그 클릭은 자연스레 "편집 열기"로 해석한다. 비활성 카드는
   // 1차로 활성 전환, 두 번째 클릭(이젠 활성)에서 편집이 열리는 흐름.
@@ -2080,7 +2206,11 @@ function AccountForm({
   // v2.18 추가. 편집 모드에선 disabled (계정 자체의 provider 를 바꾸는 건
   // 자격증명을 다시 받는 것과 같아서, 새 계정 추가로 처리하는 게 명확).
   const initialProvider: ProviderId =
-    existing && existing.provider === "gemini" ? "gemini" : "claude";
+    existing && existing.provider === "gemini"
+      ? "gemini"
+      : existing && existing.provider === "codex"
+        ? "codex"
+        : "claude";
   const [provider, setProvider] = useState<ProviderId>(initialProvider);
   const [skin, setSkin] = useState(existing?.skinId ?? DEFAULT_SKIN_ID);
   // Claude 자격증명 (provider==="claude" 일 때만 의미)
@@ -2182,6 +2312,29 @@ function AccountForm({
   };
 
   const test = async () => {
+    if (provider === "codex") {
+      // codex 는 자격증명이 없다 — 로컬 ~/.codex 기록을 읽어 바로 결과를 띄운다.
+      setTestStatus("로컬 Codex 기록 읽는 중…");
+      try {
+        const res = await invoke<{
+          five_hour_pct: number;
+          weekly_pct: number;
+          monthly_pct?: number;
+          tier?: string | null;
+        }>("test_api_config", { provider: "codex", credentials: {} });
+        const tierPart = res.tier ? ` · ${res.tier}` : "";
+        const monthlyPart =
+          res.monthly_pct != null
+            ? ` · 월간 ${res.monthly_pct.toFixed(0)}%`
+            : "";
+        setTestStatus(
+          `5h ${res.five_hour_pct.toFixed(0)}% · 주간 ${res.weekly_pct.toFixed(0)}%${monthlyPart}${tierPart}`,
+        );
+      } catch (e: unknown) {
+        setTestStatus(String(e));
+      }
+      return;
+    }
     if (provider === "gemini") {
       if (!cookie.trim()) {
         setTestStatus("Gemini 쿠키를 채워주세요.");
@@ -2249,6 +2402,16 @@ function AccountForm({
   };
 
   const submit = () => {
+    if (provider === "codex") {
+      // codex 는 자격증명이 없어 라벨·캐릭터만으로 계정을 만든다.
+      onSubmit({
+        id: existing?.id ?? cryptoRandomId(),
+        label: label.trim() || "이름 없음",
+        provider: "codex",
+        skinId: skin,
+      });
+      return;
+    }
     if (provider === "gemini") {
       if (!cookie.trim()) {
         setTestStatus("Gemini 쿠키를 채워주세요.");
@@ -2355,6 +2518,18 @@ function AccountForm({
             >
               Gemini
             </button>
+            <button
+              type="button"
+              className={`provider-tab ${provider === "codex" ? "selected" : ""}`}
+              onClick={() => {
+                setProvider("codex");
+                setCookie("");
+                setTestStatus("");
+              }}
+              aria-pressed={provider === "codex"}
+            >
+              Codex
+            </button>
           </div>
         </div>
       )}
@@ -2414,6 +2589,15 @@ function AccountForm({
           />
         </div>
       )}
+      {provider === "codex" && (
+        <p className="field-hint codex-note">
+          🖥️ <strong>이 컴퓨터의 Codex CLI 사용량</strong>을 자동으로 읽어요
+          (<code>~/.codex/sessions</code>). 쿠키·로그인이 필요 없어요. 아래{" "}
+          <strong>테스트</strong>로 지금 사용량을 확인할 수 있어요. (무료 플랜은
+          5h·주간 대신 월간 한도만 표시됩니다.)
+        </p>
+      )}
+      {provider !== "codex" && (
       <button
         type="button"
         className="cred-toggle"
@@ -2437,7 +2621,8 @@ function AccountForm({
           )}
         </span>
       </button>
-      {showFields && (
+      )}
+      {showFields && provider !== "codex" && (
         <div className="cred-fields">
           {provider === "claude" && (
             <>
@@ -2523,13 +2708,15 @@ function AccountForm({
         </div>
       )}
       <div className="api-actions">
-        <button
-          type="button"
-          onClick={() => autoCapture("session")}
-          title="claude.ai 세션 쿠키(Org ID + 세션 쿠키)를 자동으로 가져옵니다."
-        >
-          {provider === "claude" ? "세션 자동" : "자동으로 가져오기"}
-        </button>
+        {provider !== "codex" && (
+          <button
+            type="button"
+            onClick={() => autoCapture("session")}
+            title="claude.ai 세션 쿠키(Org ID + 세션 쿠키)를 자동으로 가져옵니다."
+          >
+            {provider === "claude" ? "세션 자동" : "자동으로 가져오기"}
+          </button>
+        )}
         {provider === "claude" && (
           <button
             type="button"

@@ -234,6 +234,21 @@
 - [ ] **테스트 회귀 없음**: `npm test` 의 frozen 케이스(claudeApi.test.mjs 12건, store.test.ts 13건) 가 모두 통과. 새 케이스 +45 (providers/gemini.test.mjs 29 + providers/index.test.mjs 10 + store.test.ts 신규 6)
 - [ ] **Gemini 쿠키 회전 자동 갱신 (v2.20+)**: Gemini 계정을 활성으로 두고 앱을 *오래 켜둬도*(수십 분~몇 시간) "SNlM0e 비어있음/로그아웃" 에러로 끊기지 않음. 매 폴링(30s)마다 응답 `Set-Cookie` 의 회전 토큰(`__Secure-1PSIDTS`/`SIDCC` 계열)이 저장 쿠키에 머지됨. 앱 재시작 후에도 직전 갱신된 쿠키로 곧장 연결(store write-back). 단, 앱을 수 시간 완전히 꺼두면 SIDTS 만료로 재-paste 필요(정상)
 
+## 19. Provider 분리 — Codex(OpenAI) 추가 (v2.xx+)
+
+`Account` union 에 `provider: "codex"` 추가. claude/gemini 와 달리 **자격증명(쿠키/OAuth)이 전혀 없고**, 로컬 `~/.codex/sessions/**/rollout-*.jsonl` 의 마지막 `token_count` 이벤트 안 `rate_limits` 를 읽어 표시만 한다 (Claude 의 ~/.claude jsonl 워크와 같은 결). 검증 포커스: (a) 쿠키 없이 로컬 자동으로 사용량이 뜨는지, (b) Plus/Pro 는 5h+주간, 무료 플랜은 월간 단독으로 그려지는지, (c) claude/gemini 표시가 그대로(회귀 없음)인지.
+
+- [ ] **Codex 계정 추가**: 설정 → 새 계정 추가 → 상단 "Codex" 탭 클릭 → 쿠키 입력칸/자동 가져오기 버튼이 **안 보이고**, 대신 "🖥️ 이 컴퓨터의 Codex CLI 사용량을 자동으로 읽어요 (`~/.codex/sessions`)" 안내가 뜸
+- [ ] **테스트 버튼(로컬)**: 테스트 누르면 "로컬 Codex 기록 읽는 중…" → 한 줄에 `5h XX% · 주간 XX%`(Plus/Pro) 또는 `5h 0% · 주간 0% · 월간 XX% · Free`(무료) + tier 표시. 쿠키 없이 동작
+- [ ] **추가 + 카드 꼬리표**: 라벨/캐릭터만으로 계정 생성됨. 계정 카드 우측 꼬리표가 `Codex` (claude 는 org 끝4자리, gemini 는 `Gemini`)
+- [ ] **활성 시 트레이/버블 (Plus/Pro)**: Codex 를 활성으로 두면 5h%/주간% 가 claude 와 동일 포맷으로 트레이·UsageBubble 에 표시. 대나무 tier 아이콘도 5h 기준으로 동작
+- [ ] **무료 플랜 = 월간 단독(monthlyOnly)**: 5h/주간 윈도우가 없는 무료 계정이면 UsageBubble 이 5h/주간 두 줄 대신 **"월간" 한 줄**(잔량% + 리셋 카운트다운)만, 트레이 라벨은 **`월 XX%`**, 펫 표정은 월간 잔량 기준(80% 소진 → tired, 100% → dead). 표시 모드(5h/both/all) 와 무관
+- [ ] **무료 플랜 알림**: monthlyOnly 일 때 "5시간/주간 소진" 오탐이 안 뜨고, 월간 잔량 30/10/0% 진입 시 "월간 한도 XX% 남음" 알림만 발사
+- [ ] **기록 없음 안내**: `~/.codex/sessions` 가 비었거나 한 번도 안 돌린 계정은 테스트/폴링에서 "Codex 사용 기록을 찾지 못했어요 … 한 번 이상 실행하면" 안내 (앱 크래시 X, disconnected 표정)
+- [ ] **claude/gemini 회귀 없음**: claude·gemini 활성 계정은 종전대로 5h/주간 두 줄 + 트레이 포맷 그대로 (monthlyOnly=false 경로). monthly 필드는 codex 무료에서만 채워짐
+- [ ] **편집 모드 provider 토글 비노출**: 기존 계정 편집 시 Codex 탭(=provider 탭) 안 뜸 (다른 provider 와 동일)
+- [ ] **테스트 회귀 없음**: `npm test` 전체 통과. 신규 `electron/providers/codex.test.mjs` 26 + `petLogic.test.ts` monthly/formatTrayLabelMonthly 9 케이스 포함
+
 ## 16. 업데이트 일지 + 업데이트 팝업 (v2.26+)
 
 큰 작업만 큐레이션한 일지(`src/changelog.ts`). 트레이 메뉴 "업데이트 일지" → 전체 목록. 새 버전으로 올라가면 부팅 시 "방금 업데이트됨" 팝업(직전 본 버전 이후 항목만).

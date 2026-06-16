@@ -446,6 +446,26 @@
 .character:active {
   cursor: grabbing;
 }
+
+/* 활성 계정 이름 태그 — 캐릭터 아래 여백에 작은 알약. 더블클릭 계정 전환과 짝.
+   .pet-content-inner 의 in-flow flex 자식이라 align-items:center 로 가운데 정렬되고
+   윈도우 자동 리사이즈(ResizeObserver)에 포함돼 잘리지 않는다. */
+.account-tag {
+  max-width: 150px;
+  padding: 2px 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e2e2e2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-size: 10px;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+  z-index: 2;
+}
 .character img {
   position: absolute;
   inset: 0;

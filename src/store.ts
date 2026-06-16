@@ -112,7 +112,9 @@ export async function loadApiConfig(): Promise<ApiConfig | null> {
   const cfg = await loadAccountsConfig();
   const active = cfg.accounts.find((a) => a.id === cfg.activeAccountId);
   if (!active) return null;
-  if (active.provider === "gemini") return null;
+  // claude 전용 모양 — claude 가 아닌 provider(gemini/codex)는 자격증명 모양이
+  // 달라(또는 없어) null 을 돌려 옛 claude-only 경로를 건너뛰게 한다.
+  if (active.provider === "gemini" || active.provider === "codex") return null;
   return { orgId: active.orgId, cookie: active.cookie };
 }
 
@@ -131,4 +133,17 @@ export function cryptoRandomId(): string {
   const c = (globalThis as unknown as { crypto?: Crypto }).crypto;
   if (c?.randomUUID) return c.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+/** 펫 본체 더블클릭 계정 순환용 — 현재 활성 id 의 *다음* 계정 id 를 돌려준다.
+ *  목록 끝이면 처음으로 wrap. 계정이 1개 이하면 전환이 무의미하므로 null(=no-op).
+ *  활성 id 가 목록에 없으면(삭제 등) 첫 계정으로. 순수 함수라 vitest 로 경계를 굳힌다. */
+export function nextActiveAccountId(
+  ids: string[],
+  currentId: string | null,
+): string | null {
+  if (ids.length < 2) return null;
+  const idx = ids.indexOf(currentId ?? "");
+  const nextIdx = idx < 0 ? 0 : (idx + 1) % ids.length;
+  return ids[nextIdx];
 }

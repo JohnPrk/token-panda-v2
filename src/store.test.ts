@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildAccountsConfigFromLegacy, cryptoRandomId } from "./store";
+import {
+  buildAccountsConfigFromLegacy,
+  cryptoRandomId,
+  nextActiveAccountId,
+} from "./store";
 import type { AccountsConfig, ApiConfig, GeminiAccount, PlanConfig } from "./types";
 import { accountProvider } from "./types";
 
@@ -294,5 +298,31 @@ describe("cryptoRandomId", () => {
     }
     // 50개 모두 distinct 여야 함. (Math.random 폴백이라도 충분히 안전)
     expect(ids.size).toBe(50);
+  });
+});
+
+describe("nextActiveAccountId — 펫 더블클릭 계정 순환", () => {
+  it("다음 계정으로 이동", () => {
+    expect(nextActiveAccountId(["a", "b", "c"], "a")).toBe("b");
+    expect(nextActiveAccountId(["a", "b", "c"], "b")).toBe("c");
+  });
+
+  it("마지막 계정이면 처음으로 wrap", () => {
+    expect(nextActiveAccountId(["a", "b", "c"], "c")).toBe("a");
+  });
+
+  it("계정 2개면 둘 사이를 토글", () => {
+    expect(nextActiveAccountId(["a", "b"], "a")).toBe("b");
+    expect(nextActiveAccountId(["a", "b"], "b")).toBe("a");
+  });
+
+  it("계정 1개 이하면 null (전환 무의미 = no-op)", () => {
+    expect(nextActiveAccountId(["a"], "a")).toBeNull();
+    expect(nextActiveAccountId([], null)).toBeNull();
+  });
+
+  it("활성 id 가 목록에 없으면(삭제 등) 첫 계정", () => {
+    expect(nextActiveAccountId(["a", "b", "c"], "zzz")).toBe("a");
+    expect(nextActiveAccountId(["a", "b"], null)).toBe("a");
   });
 });

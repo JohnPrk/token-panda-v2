@@ -22,10 +22,12 @@
 
 const claudeProvider = require("./claude.cjs");
 const geminiProvider = require("./gemini.cjs");
+const codexProvider = require("./codex.cjs");
 
 const PROVIDERS = Object.freeze({
   claude: claudeProvider,
   gemini: geminiProvider,
+  codex: codexProvider,
 });
 
 const DEFAULT_PROVIDER_ID = "claude";

@@ -46,6 +46,12 @@ export type DerivedState = {
   cacheNudge: boolean;
   fiveHourResetMs: number | null;
   weeklyResetMs: number | null;
+  /** Codex 무료 플랜처럼 5h/주간 윈도우가 없고 월간 한도만 오는 경우 true.
+   *  이때는 모든 표시(버블·트레이·펫 상태)를 monthly* 기준으로 통일한다. */
+  monthlyOnly: boolean;
+  monthlyRemaining: number;
+  monthlyUsed: number;
+  monthlyResetMs: number | null;
 };
 
 export function derive(
@@ -64,6 +70,10 @@ export function derive(
       cacheNudge: false,
       fiveHourResetMs: null,
       weeklyResetMs: null,
+      monthlyOnly: false,
+      monthlyRemaining: 1,
+      monthlyUsed: 0,
+      monthlyResetMs: null,
     };
   }
   // Prefer the live API if it's fresh (<2 minutes old). Anthropic's own
@@ -81,25 +91,41 @@ export function derive(
   const fiveHourRemaining = 1 - fiveHourUsed;
   const weeklyRemaining = 1 - weeklyUsed;
 
+  // Codex 무료 플랜은 5h/주간 윈도우가 없고 월간 한도(used_percent)만 온다.
+  // 5h·주간 reset 시각이 둘 다 없는데 monthly_pct 가 있으면 "월간-단독"으로 보고
+  // 모든 표시(펫 상태·트레이·버블)를 월간 잔량 기준으로 통일한다. claude/gemini 는
+  // monthly_pct 를 안 채우므로 monthlyOnly 가 항상 false (= 기존 동작 그대로).
+  const monthlyPct =
+    apiFresh && snap.api!.monthly_pct != null ? snap.api!.monthly_pct : null;
+  const monthlyOnly =
+    monthlyPct !== null &&
+    !snap.api!.five_hour_resets_at &&
+    !snap.api!.weekly_resets_at;
+  const monthlyUsed = monthlyPct !== null ? clampPct(monthlyPct / 100) : 0;
+  const monthlyRemaining = 1 - monthlyUsed;
+
   // Pet state is driven by the 5h remaining %, matching the top-of-bubble
   // % readout that v0.8 unified to 5h. Weekly is intentionally NOT mixed
   // into the tier math so a high 5h doesn't get pulled down by a half-used
   // weekly. The single weekly hook is `weekly = 0 → dead`, which is rare
-  // enough to justify its own escape hatch.
+  // enough to justify its own escape hatch. monthlyOnly(코덱스 무료)면 같은
+  // 사다리를 월간 잔량에 태우고, dead 훅도 월간 소진으로 바꾼다.
   // `disconnected` overrides everything else. 신선한 live API 응답이 없으면
   // (1) 쿠키 만료/네트워크 에러로 stale, (2) 사용자가 연동 해제해서
   // config 자체가 비어 polling이 멈춘 상태, (3) 첫 polling 직전 등
   // 어느 경우든 quota 수치를 신뢰할 수 없으므로 disconnected로 표시한다.
+  const tierRemaining = monthlyOnly ? monthlyRemaining : fiveHourRemaining;
+  const exhausted = monthlyOnly ? monthlyRemaining <= 0 : weeklyRemaining <= 0;
   let petState: PetState;
   const apiBroken = !apiFresh;
   if (apiBroken) petState = "disconnected";
-  else if (weeklyRemaining <= 0) petState = "dead";
-  else if (fiveHourRemaining <= 0.15) petState = "sleepy";
-  else if (fiveHourRemaining <= 0.33) petState = "tired";
-  else if (fiveHourRemaining <= 0.49) petState = "low";
-  else if (fiveHourRemaining <= 0.63) petState = "mid";
-  else if (fiveHourRemaining <= 0.77) petState = "good";
-  else if (fiveHourRemaining <= 0.90) petState = "high";
+  else if (exhausted) petState = "dead";
+  else if (tierRemaining <= 0.15) petState = "sleepy";
+  else if (tierRemaining <= 0.33) petState = "tired";
+  else if (tierRemaining <= 0.49) petState = "low";
+  else if (tierRemaining <= 0.63) petState = "mid";
+  else if (tierRemaining <= 0.77) petState = "good";
+  else if (tierRemaining <= 0.90) petState = "high";
   else petState = "full";
 
   let cacheRemainMs: number | null = null;
@@ -127,6 +153,13 @@ export function derive(
   const weeklyResetMs = weeklyResetSrc
     ? Math.max(0, Date.parse(weeklyResetSrc) - nowMs)
     : null;
+  // 월간 reset 은 codex api 응답에만 있다(top-level snapshot 에는 월간 자리가
+  // 없음). 그래서 5h/주간과 달리 snap 폴백 없이 api 신선분만 본다.
+  const monthlyResetSrc =
+    apiFresh && snap.api!.monthly_resets_at ? snap.api!.monthly_resets_at : null;
+  const monthlyResetMs = monthlyResetSrc
+    ? Math.max(0, Date.parse(monthlyResetSrc) - nowMs)
+    : null;
 
   return {
     fiveHourRemaining,
@@ -138,6 +171,10 @@ export function derive(
     cacheNudge,
     fiveHourResetMs,
     weeklyResetMs,
+    monthlyOnly,
+    monthlyRemaining,
+    monthlyUsed,
+    monthlyResetMs,
   };
 }
 
@@ -184,6 +221,13 @@ export function formatTrayLabel(
       ? `$${prepaidDollars.toFixed(2)}`
       : "$—";
   return `${five}% · 주 ${weekly}% · ${dollarPart}`;
+}
+
+// Codex 무료 플랜처럼 5h/주간 윈도우가 없고 월간 한도만 있는 계정의 트레이 라벨.
+// 이때는 mode(fivehour/both/all)가 의미 없어 formatTrayLabel 대신 이 함수로 월간
+// 잔량%만 "월 76%" 형태로 보여준다. 다른 provider 는 호출하지 않는다(monthlyOnly).
+export function formatTrayLabelMonthly(monthlyRemaining: number): string {
+  return `월 ${Math.round(clampUnit(monthlyRemaining) * 100)}%`;
 }
 
 function clampUnit(v: number): number {

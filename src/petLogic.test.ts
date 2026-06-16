@@ -11,6 +11,7 @@ import {
   formatResetCountdown,
   formatTokens,
   formatTrayLabel,
+  formatTrayLabelMonthly,
   hashHue,
   scaleFromDrag,
 } from "./petLogic";
@@ -200,6 +201,76 @@ describe("derive", () => {
   });
 });
 
+describe("derive — Codex 월간 단독(monthlyOnly)", () => {
+  // 무료 Codex 플랜: 5h/주간 윈도우가 없고(둘 다 0% + reset 없음) 월간 한도만 온다.
+  it("monthly_pct 만 있고 5h/주간 reset 없으면 monthlyOnly=true + 펫상태를 월간으로", () => {
+    const d = derive(
+      snap({ api: api({ five_hour_pct: 0, weekly_pct: 0, monthly_pct: 80 }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.monthlyOnly).toBe(true);
+    expect(d.monthlyUsed).toBeCloseTo(0.8);
+    expect(d.monthlyRemaining).toBeCloseTo(0.2);
+    // 월간 잔량 ~20% → tired (0.15 < rem ≤ 0.33). 5h가 0%여도 dead 가 아님.
+    expect(d.petState).toBe("tired");
+  });
+
+  it("월간 100% 소진이면 dead (월간 잔량 0)", () => {
+    const d = derive(
+      snap({ api: api({ five_hour_pct: 0, weekly_pct: 0, monthly_pct: 100 }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.monthlyOnly).toBe(true);
+    expect(d.monthlyRemaining).toBe(0);
+    expect(d.petState).toBe("dead");
+  });
+
+  it("monthly_resets_at 신선하면 monthlyResetMs 환산", () => {
+    const resetAt = new Date(NOW_MS + 3 * 24 * 60 * 60 * 1000).toISOString();
+    const d = derive(
+      snap({ api: api({ monthly_pct: 50, monthly_resets_at: resetAt }) }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.monthlyResetMs).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+
+  it("snap이 null이면 monthlyOnly=false + 월간 잔량 full", () => {
+    const d = derive(null, limits, NOW_MS);
+    expect(d.monthlyOnly).toBe(false);
+    expect(d.monthlyRemaining).toBe(1);
+    expect(d.monthlyResetMs).toBeNull();
+  });
+
+  it("일반 Claude 응답(월간 없음)은 monthlyOnly=false (기존 동작 보존)", () => {
+    const d = derive(snap({ api: api({ five_hour_pct: 5 }) }), limits, NOW_MS);
+    expect(d.monthlyOnly).toBe(false);
+    expect(d.petState).toBe("full");
+  });
+
+  it("5h/주간이 있고 월간도 있으면(Plus/Pro) monthlyOnly=false — 5h가 표시를 끈다", () => {
+    const resetAt = new Date(NOW_MS + 30 * 60 * 1000).toISOString();
+    const d = derive(
+      snap({
+        api: api({
+          five_hour_pct: 10,
+          weekly_pct: 20,
+          five_hour_resets_at: resetAt,
+          monthly_pct: 50,
+        }),
+      }),
+      limits,
+      NOW_MS,
+    );
+    expect(d.monthlyOnly).toBe(false);
+    // 월간 데이터 자체는 파싱돼 흐르지만, 표시 분기는 5h 기준.
+    expect(d.monthlyRemaining).toBeCloseTo(0.5);
+    expect(d.fiveHourRemaining).toBeCloseTo(0.9);
+  });
+});
+
 describe("formatTokens", () => {
   it("1000 미만은 그대로 정수 문자열", () => {
     expect(formatTokens(0)).toBe("0");
@@ -289,6 +360,25 @@ describe("formatTrayLabel", () => {
     // 4번째 인자가 들어와도 fivehour/both는 변동 없음.
     expect(formatTrayLabel("fivehour", 0.76, 0.54, 99.99)).toBe("76%");
     expect(formatTrayLabel("both", 0.76, 0.54, 99.99)).toBe("76% · 주 54%");
+  });
+});
+
+describe("formatTrayLabelMonthly", () => {
+  it("월간 잔량%만 '월 N%' 로 반올림 표시", () => {
+    expect(formatTrayLabelMonthly(0.76)).toBe("월 76%");
+    expect(formatTrayLabelMonthly(1)).toBe("월 100%");
+    expect(formatTrayLabelMonthly(0)).toBe("월 0%");
+  });
+
+  it("0–1 범위 밖 입력은 클램프 (음수/1 초과/NaN)", () => {
+    expect(formatTrayLabelMonthly(-0.5)).toBe("월 0%");
+    expect(formatTrayLabelMonthly(1.5)).toBe("월 100%");
+    expect(formatTrayLabelMonthly(NaN)).toBe("월 0%");
+  });
+
+  it("반올림 경계", () => {
+    expect(formatTrayLabelMonthly(0.5)).toBe("월 50%");
+    expect(formatTrayLabelMonthly(0.005)).toBe("월 1%");
   });
 });
 

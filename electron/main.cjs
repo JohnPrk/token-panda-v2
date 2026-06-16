@@ -23,7 +23,16 @@ const {
   clampPetPosition,
 } = require("./helpers.cjs");
 
-app.setName("token-panda");
+// dock·메뉴바에 보이는 이름은 한글 "토큰 지키미"로. macOS 는 dock/메뉴바에
+// CFBundleName(=ASCII "TokenGuardians", helper 경로 lookup 용)을 쓰기 때문에
+// 번들의 CFBundleDisplayName("토큰 지키미")만으로는 dock 에 영어가 샌다.
+// → 런타임 app 이름으로 override. helper 폴더명은 ASCII 그대로라 v2.24 의
+// NFC/NFD SIGTRAP 와 무관하다(현재도 app.name="token-panda"≠helper 폴더명인데
+// 정상 동작 → app 이름 변경은 안전).
+// 단 userData 는 기존 "token-panda" 경로로 고정해 설정 데이터를 그대로 보존한다.
+const USER_DATA_DIR = path.join(app.getPath("appData"), "token-panda");
+app.setName("토큰 지키미");
+app.setPath("userData", USER_DATA_DIR);
 
 // unpackaged 실행 시 app.getVersion() 은 Electron 버전을 돌려주므로,
 // 트레이/로그 표시는 package.json 의 앱 버전을 직접 읽는다 (빌드 신선도 확인용).
@@ -673,7 +682,17 @@ function createTray() {
 // 보이면 무조건 claude, 그 외에 a.provider="gemini" 면 gemini.
 function normalizeApiConfig(a) {
   const trim = (v) => (v != null ? String(v).trim() : "");
-  const providerId = a.provider === "gemini" ? "gemini" : "claude";
+  const providerId =
+    a.provider === "gemini"
+      ? "gemini"
+      : a.provider === "codex"
+        ? "codex"
+        : "claude";
+  if (providerId === "codex") {
+    // codex 는 자격증명이 없다 — 로컬 ~/.codex/sessions 로그만 읽으므로 항상
+    // 유효한 normalized 를 돌려준다(credentials 빈 객체).
+    return { provider: "codex", credentials: {} };
+  }
   if (providerId === "gemini") {
     // gemini: credentials = { cookie }
     const c = a.credentials || a;

@@ -61,8 +61,11 @@ mac:
   category: public.app-category.developer-tools
   # CFBundleName 은 productName(=TokenGuardians) 그대로 — Electron helper 가
   # CFBundleName 으로 helper.app path 를 lookup 해서 NFC/NFD mismatch SIGTRAP
-  # 회피. 사용자가 dock/menubar 에 보는 이름만 CFBundleDisplayName 으로
-  # "토큰 지키미" 으로 override.
+  # 회피.
+  # ⚠️ macOS 표시 규칙: dock·메뉴바는 CFBundleName 을, Finder/Applications 는
+  # CFBundleDisplayName 을 쓴다. 그래서 CFBundleDisplayName 만으론 Finder 에서만
+  # 한글이 되고 dock·메뉴바엔 영어(CFBundleName)가 샌다 — dock·메뉴바 한글화는
+  # 메인 프로세스의 app.setName("토큰 지키미") 로 처리(electron/main.cjs).
   extendInfo:
     CFBundleDisplayName: "토큰 지키미"
   target:
