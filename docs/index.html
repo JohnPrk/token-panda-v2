@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>토큰 지키미 (Token Guardians) — Claude·Gemini 토큰을 대신 알려주는 데스크톱 지키미</title>
+    <title>토큰 지키미 (Token Guardians) — Claude·Codex·Gemini 토큰을 대신 알려주는 데스크톱 지키미</title>
     <meta
       name="description"
-      content="데스크톱 한구석에서 Claude·Gemini 토큰이 얼마 남았는지 대신 알려주는 작은 지키미(펫). 5분 캐시 골든타임을 놓치지 않게 챙겨 토큰을 아껴 쓰게 돕는 메뉴바 지키미."
+      content="데스크톱 한구석에서 Claude·Codex·Gemini 토큰이 얼마 남았는지 대신 알려주는 작은 지키미(펫). 5분 캐시 골든타임을 놓치지 않게 챙겨 토큰을 아껴 쓰게 돕는 메뉴바 지키미."
     />
     <link rel="icon" href="assets/favicon.svg" />
     <meta property="og:title" content="토큰 지키미 (Token Guardians)" />
     <meta
       property="og:description"
-      content="Claude·Gemini 토큰이 얼마 남았는지 대신 알려주는 데스크톱 지키미. 5분 캐시 골든타임 알림으로 토큰을 아껴 쓰세요."
+      content="Claude·Codex·Gemini 토큰이 얼마 남았는지 대신 알려주는 데스크톱 지키미. 5분 캐시 골든타임 알림으로 토큰을 아껴 쓰세요."
     />
     <meta property="og:image" content="assets/icon.png" />
     <meta property="og:type" content="website" />
@@ -114,7 +114,51 @@
       .btn-primary:hover { background: #5a3de0; text-decoration: none; }
       .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
       .btn-ghost:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
-      .hero .platforms { margin-top: 18px; font-size: 13px; color: var(--muted); }
+      .hero .platforms { margin-top: 10px; font-size: 13px; color: var(--muted); }
+      .live-proof {
+        width: min(620px, 100%);
+        margin: 20px auto 0;
+        color: var(--body);
+      }
+      .proof-head {
+        display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+        margin-bottom: 9px; color: var(--muted); font-size: 12.5px; font-weight: 650;
+      }
+      .proof-dot {
+        width: 7px; height: 7px; border-radius: 999px; background: #2fbf7a;
+        box-shadow: 0 0 0 4px rgba(47, 191, 122, 0.12);
+      }
+      .live-proof.is-error .proof-dot { background: #d66a4a; box-shadow: 0 0 0 4px rgba(214, 106, 74, 0.12); }
+      .proof-grid {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+      }
+      .proof-stat {
+        min-width: 0; padding: 12px 10px 11px;
+        border: 1px solid rgba(107, 76, 255, 0.16); border-radius: 8px;
+        background: rgba(255, 255, 255, 0.74);
+        box-shadow: 0 8px 20px rgba(40, 24, 90, 0.06);
+      }
+      .proof-stat b {
+        display: block; min-height: 31px; color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(22px, 4vw, 29px); line-height: 1.05; font-weight: 850;
+        font-variant-numeric: tabular-nums; letter-spacing: 0;
+      }
+      .proof-stat b.is-pending { font-family: inherit; font-size: clamp(15px, 3.2vw, 18px); line-height: 1.7; }
+      .proof-stat span {
+        display: block; margin-top: 5px; color: var(--muted);
+        font-size: 11.5px; font-weight: 750; letter-spacing: 0.02em;
+      }
+      .proof-note {
+        max-width: 520px; margin: 11px auto 0; color: var(--muted);
+        font-size: 13px; line-height: 1.55;
+      }
+      @media (max-width: 520px) {
+        .proof-grid { grid-template-columns: 1fr; }
+        .proof-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; text-align: left; }
+        .proof-stat b { min-height: 0; }
+        .proof-stat span { margin-top: 0; text-align: right; }
+      }
 
       /* ── living hamlet (hero scene) ── */
       .hamlet {
@@ -487,47 +531,112 @@
       @keyframes rHop { 0% { transform: translateY(0) rotate(-5deg); } 45% { transform: translateY(-3px) rotate(-5deg); } 100% { transform: translateY(0) rotate(-5deg); } }
       @media (prefers-reduced-motion: reduce) { .rester > img { animation: none !important; } }
 
-      /* 풀숲에 쳐박힌 5분 타이머 자명종 — 길 왼편 풀밭. 바닥 1/5 잘린 PNG 를 앞에서
-         풀잎(.grass)으로 덮고, 잘린 컷 라인은 풀색 페더(::before)로 녹이고, 좌하단
-         접지 그림자(::after)로 눌러 "풀에 박힌" 무게감을 준다. 머리 위엔 5:00 타이머. */
-      .gclock { position: absolute; left: 18%; top: 59%; width: 3%; transform: translate(-50%, -100%); z-index: 4; }
-      .gclock > img {
+      /* 풀숲에 쳐박힌 5분 타이머 자명종 — 강아지/하마 옆 공통 소품. 바닥 1/5 잘린
+         PNG를 풀잎(.grass)이 앞에서 덮고, 잘린 컷 라인은 풀색 페더(::before)로 녹인다. */
+      .gclock,
+      .bclock { position: absolute; transform: translate(-50%, -100%); z-index: 4; }
+      .gclock { left: 18%; top: 59%; width: 3%; }
+      .bclock { left: 93.6%; top: 70.2%; width: 3%; z-index: 6; }
+      .gclock > img,
+      .bclock > img {
         display: block; width: 100%; height: auto; position: relative; z-index: 0;
-        /* 해가 우상단 → 형태 그림자는 좌하단·풀색 톤(rester 와 동일 결) */
         filter: drop-shadow(-2px 5px 5px rgba(40,60,30,0.34));
       }
-      /* 잘린 바닥을 풀색으로 페더 → 직선 컷 라인을 풀밭에 녹인다 */
-      .gclock::before {
+      .bclock > img {
+        transform-origin: 50% 92%;
+        transform: rotate(7deg);
+        filter: drop-shadow(-1px 4px 5px rgba(38,62,38,0.45)) saturate(0.92) brightness(0.98);
+      }
+      .gclock::before,
+      .bclock::before {
         content: ""; position: absolute; z-index: 1; left: -3%; right: -3%; bottom: 0; height: 22%;
         background: linear-gradient(180deg, rgba(124,180,98,0) 0%, rgba(120,178,96,0.82) 70%, rgba(106,166,84,0.95) 100%);
         border-radius: 0 0 42% 42%; pointer-events: none;
       }
-      /* 접지(드리운) 그림자 — 해 반대편(좌하단)으로 늘어진 짙은 풀색 타원 */
-      .gclock::after {
+      .gclock::after,
+      .bclock::after {
         content: ""; position: absolute; z-index: -1; left: -8%; bottom: -4%; width: 116%; height: 26%;
         background:
           radial-gradient(44% 50% at 50% 50%, rgba(18,46,22,0.60), rgba(18,46,22,0) 68%),
           radial-gradient(72% 64% at 50% 54%, rgba(28,56,30,0.30), rgba(28,56,30,0) 82%);
         border-radius: 50%; filter: blur(2px);
       }
-      /* 앞에서 시계 밑동을 덮는 풀잎 — leafG 그라데이션으로 씬 톤과 통일 */
-      .gclock .grass {
+      .gclock .grass,
+      .bclock .grass {
         position: absolute; z-index: 2; left: 50%; bottom: -3%; width: 112%; height: 34%;
         transform: translateX(-50%); pointer-events: none;
         filter: drop-shadow(0 2px 2px rgba(30,60,30,0.18));
       }
-      .gclock .grass svg { display: block; width: 100%; height: 100%; }
-      /* 시계 위 5분 타이머 알약 — 씬의 다른 타이머(.vil .tmr)와 같은 결, 차분한 초록 */
-      .gclock .gtmr {
+      .gclock .grass svg,
+      .bclock .grass svg { display: block; width: 100%; height: 100%; }
+      .gclock .gtmr,
+      .bclock .btmr {
         position: absolute; z-index: 3; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 7px;
         display: inline-flex; align-items: center; gap: 3px;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 9.5px; font-weight: 700; color: #2f9e57;
-        background: #fff; border: 1px solid #d8efe0; border-radius: 999px;
+        font-size: 9.5px; font-weight: 700;
+        background: #fff; border-radius: 999px;
         padding: 2px 7px; box-shadow: 0 4px 10px rgba(60,40,130,0.12); white-space: nowrap;
       }
-      .gclock .gtmr .ic { font-size: 8.5px; }
-      @media (prefers-reduced-motion: reduce) { .gclock .grass { filter: none; } }
+      .gclock .gtmr { color: #2f9e57; border: 1px solid #d8efe0; }
+      .bclock .btmr { color: #b15462; border: 1px solid #ecd4d9; opacity: 0.94; }
+      .gclock .gtmr .ic,
+      .bclock .btmr .ic { font-size: 8.5px; }
+      .bclock .btmr .bu { font-weight: 650; font-size: 9px; color: #a2a8b2; }
+      @media (prefers-reduced-motion: reduce) { .gclock .grass, .bclock .grass { filter: none; } }
+
+      /* 우측 풀밭(대나무 망루 아래)에 뻗은 하마 — 좌측 강아지(.rester)의 거울상 끝점.
+         캐시 5분 골든타임을 놓쳐 타이머가 0:00 으로 만료, 토큰이 바닥나 방전(dead 포즈)됐다.
+         강아지와 같은 좌표계(발끝 translate)·풀색 그림자 결을 쓰되, 자랑 대신 시무룩 +
+         옆에 꺼진 만료 시계. 강아지=여유(시계 멀리 치움) ↔ 하마=방전(시계 0:00). */
+      /* left 83.0% = 망루의 '왼쪽 앞 대나무 기둥'(hero 83.1%, 원근상 앞다리; 79·80.9% 는
+         사다리·뒷다리)을 누운 몸 한가운데에 맞춤 — 망루 전체 중심(86.9%)이 아니라 앞기둥 기준.
+         dead.png 질량 중심이 캔버스 정중앙(0.50)이라 컨테이너 중심 = 몸 중심. (hero 박스는
+         화면서 10.9~89% inset 이라 스크린샷 px 를 hero% 로 환산해 기둥 위치를 측정했다.)
+         width 11.4% = dead.png 는 큰 포즈(fill 0.69×0.83, sit 0.58×0.79)라 직전 sit(13.5%)
+         대비 보이는 크기 ~10% 작게 잡은 값이다. */
+      .waiter { position: absolute; left: 83.0%; top: 65.4%; width: 11.4%; transform: translate(-50%, -100%); z-index: 5; }
+      .waiter > img {
+        display: block; width: 100%; height: auto; position: relative; z-index: 2;
+        transform-origin: 50% 90%;
+        /* 해가 우상단 → 형태 그림자는 좌하단·풀색 톤(강아지와 동일). 살짝 채도/명도를
+           낮춰 '기운 빠진' 톤으로. */
+        filter: drop-shadow(-1px 4px 5px rgba(38,62,38,0.45)) saturate(0.9) brightness(0.98);
+        animation: wSlump 6s ease-in-out infinite;
+      }
+      /* 풀밭 접지 그림자 — 강아지 .rester::after 와 동일 결(좌하단 2-stop 타원) */
+      .waiter::after {
+        content: ""; position: absolute; z-index: -1;
+        left: -6%; bottom: 7%; width: 112%; height: 28%;
+        background:
+          radial-gradient(42% 48% at 50% 52%, rgba(20,44,22,0.70), rgba(20,44,22,0) 67%),
+          radial-gradient(74% 66% at 50% 56%, rgba(30,58,32,0.36), rgba(30,58,32,0) 82%);
+        border-radius: 50%; filter: blur(2px);
+      }
+      /* 몸이 풀에 잠긴 안쪽 포켓 음영(강아지 .rester::before 와 동일) */
+      .waiter::before {
+        content: ""; position: absolute; z-index: -1;
+        left: 5%; bottom: 11%; width: 90%; height: 27%;
+        background: radial-gradient(50% 56% at 50% 44%, rgba(18,42,22,0.44), rgba(18,42,22,0) 70%);
+        border-radius: 50%; filter: blur(4px);
+      }
+      /* 아주 약한 처짐(한숨) — 강아지 rBob 보다 느리고 작게, 위로 안 뜨고 살짝 가라앉음.
+         hop(깡총) 은 없음. */
+      @keyframes wSlump { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
+      /* 말풍선 — 강아지 .rbubble 과 같은 흰 알약/라벤더 톤. 단일 대사라 grid 불필요. */
+      .waiter .wbubble {
+        position: absolute; left: 50%; bottom: 100%; margin-bottom: 1px; transform: translateX(-50%);
+        font-size: 11px; font-weight: 650; color: #4a3b86;
+        background: #fff; border: 1px solid #e7e0ff; border-radius: 13px;
+        padding: 5px 8px; box-shadow: 0 8px 18px rgba(60,40,130,0.16);
+        text-align: left; line-height: 1.25; white-space: nowrap;
+      }
+      .waiter .wbubble::after {
+        content: ""; position: absolute; left: 50%; top: 100%; margin-top: -1px;
+        transform: translateX(-50%);
+        border: 6px solid transparent; border-top-color: #fff;
+      }
+      @media (prefers-reduced-motion: reduce) { .waiter > img { animation: none !important; } }
 
       .hamlet-cap { text-align: center; margin: 18px auto 0; max-width: 580px; color: var(--muted); font-size: 14px; }
       @media (max-width: 560px) {
@@ -1479,7 +1588,7 @@
       /* '낭비' 카드 합계 아래 배수 차이 한 줄 */
       .cc-ratio { margin-top: 14px; text-align: right; font-size: 14px; font-weight: 800; color: #d8324b; }
 
-      /* ── 셋업 탭 (4가지 셋업 데모 전환) ── */
+      /* ── 셋업 탭 (5가지 셋업 데모 전환) ── */
       .setup-tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 30px 0 6px; }
       .setup-tab {
         appearance: none; -webkit-appearance: none; cursor: pointer; font: inherit;
@@ -1827,6 +1936,10 @@
       .obset-warn { font-size: 11px; line-height: 1.55; color: #8a5a00; background: #fff6e0; border: 1px solid #f0d99a; border-radius: 8px; padding: 9px 11px; }
       .obset-warn strong { color: #6b4500; }
       .obset-warn code { background: #f3e6c4; color: #6b4500; padding: 0 3px; border-radius: 3px; font-family: ui-monospace, monospace; }
+      .obset-info { font-size: 11px; line-height: 1.55; color: #31516d; background: #eaf4ff; border: 1px solid #c9def5; border-radius: 8px; padding: 9px 11px; }
+      .obset-info strong { color: #173c5e; }
+      .obset-info code { background: #dcecff; color: #174ea6; padding: 0 3px; border-radius: 3px; font-family: ui-monospace, monospace; }
+      .obset-info[hidden] { display: none; }
       .obc-cookie .rot { color: #c5221f; font-weight: 700; }
       .obc-rotnote { padding: 6px 12px 0; font-size: 10px; color: #c5221f; line-height: 1.5; }
       .obc-rotnote b { font-weight: 800; }
@@ -1869,7 +1982,7 @@
           <a href="#remaining">잔량</a>
           <a href="#setup">셋업</a>
           <a href="#update">자동 업데이트</a>
-          <a class="nav-cta" data-dl="auto" href="https://github.com/JohnPrk/token-guardians/releases/latest">다운로드</a>
+          <a class="nav-cta" href="#download">다운로드</a>
         </span>
       </div>
     </nav>
@@ -1879,7 +1992,7 @@
       <div class="wrap hero-copy">
         <h1>토큰 얼마 남았는지, <span class="grad">더는 안 봐도 돼요!</span></h1>
         <p class="tagline">
-          데스크톱 한구석의 작은 지키미(펫)가 Claude·Gemini 토큰 잔량을 대신 알려줘요!
+          데스크톱 한구석의 작은 지키미(펫)가 Claude·Codex·Gemini 토큰 잔량을 대신 알려줘요!
           5분 캐시 골든타임도 놓치지 않게 챙겨줘서, 토큰을 아껴 쓸 수 있어요.
         </p>
       </div>
@@ -2080,6 +2193,46 @@
             </span>
           </div>
 
+          <!-- 우측 풀밭(대나무 망루 아래): 캐시 골든타임을 놓쳐 토큰이 바닥난 하마.
+               좌측 강아지(.rester)의 정반대 끝점 — 5분 캐시 타이머가 0:00 으로 만료돼
+               완전히 방전돼(dead 포즈) "주인이 안 온다"고 뻗어 있다. -->
+          <div class="waiter">
+            <span class="wbubble">💬 내 주인은…<br>오질 않아</span>
+            <img src="assets/float/hippo-dead.png" alt="" />
+          </div>
+
+          <!-- 하마 오른쪽 풀밭에 버려진 고장난 자명종 — 캐시 골든타임을 놓쳐 망가진 시계.
+               강아지/하마와 동일한 초록 접지 그림자/포켓으로 풀에 파묻힌 듯 앉힌다(바닥 잘린 PNG). -->
+          <div class="bclock" aria-hidden="true">
+            <span class="btmr"><span class="ic">⏱</span>0:00<span class="bu">캐시 마감</span></span>
+            <img src="assets/float/clock-broken.png" alt="" />
+            <span class="grass" aria-hidden="true">
+              <svg viewBox="0 0 130 46" preserveAspectRatio="none">
+                <g fill="#3f8a49" opacity="0.9">
+                  <path d="M6.2 46 Q8.0 32.0 6.6 18.0 Q10.0 32.0 11.8 46 Z"/>
+                  <path d="M25.0 46 Q26.6 34.6 26.8 23.2 Q28.3 34.6 30.0 46 Z"/>
+                  <path d="M39.9 46 Q41.8 33.5 48.7 21.0 Q43.8 33.5 45.6 46 Z"/>
+                  <path d="M51.7 46 Q53.6 32.0 60.5 18.1 Q55.7 32.0 57.6 46 Z"/>
+                  <path d="M69.2 46 Q70.7 34.9 72.9 23.8 Q72.4 34.9 73.9 46 Z"/>
+                  <path d="M90.2 46 Q91.6 35.8 92.6 25.6 Q93.2 35.8 94.7 46 Z"/>
+                  <path d="M98.5 46 Q100.6 33.7 103.3 21.3 Q102.9 33.7 105.1 46 Z"/>
+                  <path d="M121.8 46 Q123.6 33.4 121.5 20.9 Q125.5 33.4 127.4 46 Z"/>
+                </g>
+                <g fill="url(#leafG)">
+                  <path d="M-3.2 46 Q-1.1 26.4 4.3 6.8 Q1.3 26.4 3.4 46 Z"/>
+                  <path d="M13.2 46 Q15.5 28.2 11.9 10.4 Q18.1 28.2 20.4 46 Z"/>
+                  <path d="M32.7 46 Q34.9 28.9 40.5 11.9 Q37.2 28.9 39.3 46 Z"/>
+                  <path d="M43.9 46 Q46.2 30.3 42.1 14.6 Q48.6 30.3 50.8 46 Z"/>
+                  <path d="M60.9 46 Q62.9 30.1 59.8 14.2 Q65.0 30.1 67.0 46 Z"/>
+                  <path d="M73.1 46 Q75.2 26.9 82.0 7.8 Q77.4 26.9 79.4 46 Z"/>
+                  <path d="M94.7 46 Q96.9 28.6 99.8 11.2 Q99.3 28.6 101.6 46 Z"/>
+                  <path d="M105.2 46 Q107.0 27.9 107.3 9.9 Q109.0 27.9 110.8 46 Z"/>
+                  <path d="M121.0 46 Q123.0 31.2 119.3 16.4 Q125.2 31.2 127.3 46 Z"/>
+                </g>
+              </svg>
+            </span>
+          </div>
+
           <!-- villager (햄스터): 길 위에 서서 5분 캐시 타이머를 들고 있다가,
                마감이 다가오면 길을 따라 앞(뷰어 쪽)으로 달려온다.
                좌표는 배경 길 위 기준: hx/hy = 발끝 위치(0~1), hs = 원근 크기 -->
@@ -2162,6 +2315,15 @@
           <a class="btn btn-ghost" data-dl="win" href="https://github.com/JohnPrk/token-guardians/releases/latest">Windows .exe 다운로드</a>
         </div>
         <p class="platforms">macOS 11+ (Apple Silicon) · Windows 11 x64 · 무료 · 오픈소스 (MIT)</p>
+        <div class="live-proof" data-live-stats aria-live="polite">
+          <div class="proof-head"><span class="proof-dot" aria-hidden="true"></span><span data-live-status>사용 통계 불러오는 중</span></div>
+          <div class="proof-grid">
+            <div class="proof-stat"><b data-stat="downloads">--</b><span>누적 다운로드</span></div>
+            <div class="proof-stat"><b data-stat="retention-d1">--</b><span>D1 리텐션</span></div>
+            <div class="proof-stat"><b data-stat="retention-d7">--</b><span>D7 리텐션</span></div>
+          </div>
+          <p class="proof-note">제가 필요해서 만들었지만, 다른 분들의 AI 생활에도 도움이 되는 앱이 되었으면 합니다.</p>
+        </div>
       </div>
     </header>
 
@@ -2590,14 +2752,15 @@
     <section id="setup" class="problem">
       <div class="wrap">
         <p class="eyebrow">Setup</p>
-        <h2>어떤 셋업이든, 쿠키 한 줄이면 됩니다</h2>
+        <h2>어떤 셋업이든, 금방 연결됩니다</h2>
         <p class="lead">
-          처음 설치, 계정 추가, 클로드 API 비용 보기, 제미나이 연동을 모두 다룹니다.
+          처음 설치, 코덱스 연결, 계정 추가, 클로드 API 비용 보기, 제미나이 연동을 모두 다룹니다.
           아래 탭을 누르면 각 과정이 실제 앱 화면 그대로 재생됩니다.
         </p>
 
         <div class="setup-tabs" role="tablist" aria-label="셋업 종류">
           <button type="button" class="setup-tab is-active" role="tab" aria-selected="true" data-demo="claude">클로드 셋업</button>
+          <button type="button" class="setup-tab" role="tab" aria-selected="false" data-demo="codex">코덱스 셋업</button>
           <button type="button" class="setup-tab" role="tab" aria-selected="false" data-demo="account">새 계정 추가</button>
           <button type="button" class="setup-tab" role="tab" aria-selected="false" data-demo="api">클로드 API 셋업</button>
           <button type="button" class="setup-tab" role="tab" aria-selected="false" data-demo="gemini">제미나이 셋업</button>
@@ -2866,6 +3029,102 @@
         </figure>
         </div><!-- /panel: claude -->
 
+        <div class="setup-panel" data-demo="codex">
+          <figure class="ob-figure">
+            <div class="ob-scaler">
+            <div class="ob-stage">
+
+              <!-- ① 설정 창 (계정 카드 그리드 + Codex 폼) -->
+              <div class="ob-frame">
+                <div class="ob-titlebar">
+                  <span class="ob-dots"><i></i><i></i><i></i></span>
+                  <span class="ob-title">토큰 지키미 — 설정</span>
+                </div>
+                <div class="ob-settings">
+                  <h2 class="obset-h">설정</h2>
+                  <div class="obset-acc-head"><span class="obset-acc-label">계정</span></div>
+                  <p class="obset-note obset-note-ok"><strong>메인 계정</strong>에서 실시간 사용량을 받고 있어요.</p>
+                  <div class="obset-grid">
+                    <div class="obset-card is-active">
+                      <img src="assets/states/panda/sit.png" alt="" />
+                      <span class="obset-card-label">메인 계정</span>
+                      <span class="obset-card-org">…1a9e</span>
+                      <span class="obset-card-badge">활성</span>
+                    </div>
+                    <div class="obset-card" data-newcard hidden>
+                      <img src="assets/states/hamster/sit.png" alt="" />
+                      <span class="obset-card-label">Codex 계정</span>
+                      <span class="obset-card-org obset-card-prov">Codex</span>
+                    </div>
+                    <button type="button" class="obset-add" data-addtile>
+                      <span class="obset-add-plus">+</span><span>새 계정</span>
+                    </button>
+                  </div>
+
+                  <div class="obset-form" data-form hidden>
+                    <div class="obset-form-head">새 계정 추가</div>
+                    <label class="obset-field">계정 이름
+                      <input type="text" class="acc-name" spellcheck="false" />
+                    </label>
+                    <div class="obset-skin">
+                      <span class="obset-field-label">캐릭터</span>
+                      <div class="skin-grid acc-skins">
+                        <button type="button" class="skin-tile selected" title="Panda v4"><img src="assets/states/panda/sit.png" alt="" /><span>Panda v4</span></button>
+                        <button type="button" class="skin-tile" title="Cat v2"><img src="assets/states/cat/sit.png" alt="" /><span>Cat v2</span></button>
+                        <button type="button" class="skin-tile" title="Hamster v2"><img src="assets/states/hamster/sit.png" alt="" /><span>Hamster v2</span></button>
+                        <button type="button" class="skin-tile" title="Dog v1"><img src="assets/states/dog/sit.png" alt="" /><span>Dog v1</span></button>
+                        <button type="button" class="skin-tile" title="Hippo v1"><img src="assets/states/hippo/sit.png" alt="" /><span>Hippo v1</span></button>
+                        <button type="button" class="skin-tile" title="Chick v1"><img src="assets/states/chick/sit.png" alt="" /><span>Chick v1</span></button>
+                      </div>
+                    </div>
+                    <div class="obset-service">
+                      <span class="obset-field-label">서비스</span>
+                      <div class="obset-svc-tabs">
+                        <span class="obset-svc selected" data-svc="claude">Claude</span>
+                        <span class="obset-svc" data-svc="gemini">Gemini</span>
+                        <span class="obset-svc" data-svc="codex">Codex</span>
+                      </div>
+                    </div>
+
+                    <p class="obset-info acc-codex-note" hidden>
+                      <strong>이 컴퓨터의 Codex CLI 사용량</strong>을 자동으로 읽어요
+                      (<code>~/.codex/sessions</code>). 쿠키와 로그인 입력 없이
+                      <strong>테스트</strong>로 지금 사용량을 확인할 수 있어요.
+                    </p>
+                    <button type="button" class="cred-toggle codex-cred-toggle" aria-expanded="false">
+                      <span class="cred-toggle-caret" aria-hidden="true">▸</span>
+                      <span class="cred-toggle-label">직접 입력 · 자격증명 확인</span>
+                      <span class="cred-toggle-badges"></span>
+                    </button>
+                    <div class="cred-fields codex-cred-fields" hidden>
+                      <label class="obset-field">Organization ID
+                        <input type="text" class="acc-org" spellcheck="false" placeholder="63e058d5-142c-4368-bca3-39d64d78b4f5" />
+                      </label>
+                      <label class="obset-field">세션 쿠키 (5개만)
+                        <textarea class="acc-cookie" rows="3" spellcheck="false" placeholder="sessionKey=sk-ant-sid02-...; cf_clearance=...; __cf_bm=..."></textarea>
+                      </label>
+                    </div>
+
+                    <div class="obset-actions">
+                      <button type="button" class="acc-auto codex-auto">세션 자동</button>
+                      <button type="button" class="acc-test">테스트</button>
+                      <button type="button" class="primary acc-submit">추가</button>
+                      <button type="button">취소</button>
+                    </div>
+                    <p class="obset-status acc-status" hidden></p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="obset-toast" data-toast>Codex 계정이 추가됐어요</div>
+
+              <div class="ob-cursor"></div>
+            </div>
+            </div>
+            <figcaption>설정에서 서비스를 <strong>Codex</strong>로 고르면 쿠키 입력 없이 이 컴퓨터의 <code>~/.codex/sessions</code> 기록을 읽습니다. <strong>테스트</strong> 한 번으로 확인하고, <strong>추가</strong>하면 끝이에요.</figcaption>
+          </figure>
+        </div>
+
         <div class="setup-panel" data-demo="account">
           <figure class="ob-figure">
             <div class="ob-scaler">
@@ -2919,6 +3178,7 @@
                       <div class="obset-svc-tabs">
                         <span class="obset-svc selected">Claude</span>
                         <span class="obset-svc">Gemini</span>
+                        <span class="obset-svc">Codex</span>
                       </div>
                     </div>
                     <div class="paste-capture acc-paste" hidden>
@@ -3217,6 +3477,7 @@
                       <div class="obset-svc-tabs">
                         <span class="obset-svc selected" data-svc="claude">Claude</span>
                         <span class="obset-svc" data-svc="gemini">Gemini</span>
+                        <span class="obset-svc" data-svc="codex">Codex</span>
                       </div>
                     </div>
 
@@ -3420,7 +3681,7 @@
     </section>
 
     <!-- FINAL CTA -->
-    <section class="final">
+    <section class="final" id="download">
       <div class="wrap">
         <h2>지금, 지키미에게 맡겨보세요</h2>
         <p>다운로드하고 쿠키 한 줄만 등록하면 끝. 토큰 한도는 이제 지키미가 지켜봅니다.</p>
@@ -3883,7 +4144,7 @@
         render();
       })();
 
-      // ── 셋업 자동재생 데모 (4 탭: 클로드 / 새 계정 / API / 제미나이) ──
+      // ── 셋업 자동재생 데모 (5 탭: 클로드 / 코덱스 / 새 계정 / API / 제미나이) ──
       //  탭마다 별도 무대(.ob-stage) + 가짜 커서. 활성 탭만 재생하고, 탭을
       //  바꾸면 토큰으로 이전 루프를 취소한다.
       (function () {
@@ -4020,7 +4281,70 @@
           }
         }
 
-        // ── 탭 2: 새 계정 추가 (설정 창 → + 새 계정 → 이름·캐릭터 → claude.ai 쿠키 → 추가) ──
+        // ── 탭 2: 코덱스 셋업 (설정 → + 새 계정 → 서비스 Codex → 로컬 기록 테스트 → 추가) ──
+        async function playCodex(d, alive, staticMode) {
+          var win = d.q(".ob-settings");
+          var addTile = d.q("[data-addtile]"), form = d.q("[data-form]");
+          var newCard = d.q("[data-newcard]"), toast = d.q("[data-toast]");
+          var nameI = d.q(".acc-name"), status = d.q(".acc-status"), actions = d.q(".obset-actions");
+          var svcClaude = d.q('.obset-svc[data-svc="claude"]'), svcGemini = d.q('.obset-svc[data-svc="gemini"]'), svcCodex = d.q('.obset-svc[data-svc="codex"]');
+          var note = d.q(".acc-codex-note"), autoBtn = d.q(".codex-auto");
+          var credToggle = d.q(".codex-cred-toggle"), credFields = d.q(".codex-cred-fields");
+          function selectSkin(title) {
+            d.qa(".acc-skins .skin-tile").forEach(function (t) { t.classList.toggle("selected", t.getAttribute("title") === title); });
+          }
+          function setService(svc) {
+            var codex = svc === "codex";
+            if (svcClaude) svcClaude.classList.toggle("selected", svc === "claude");
+            if (svcGemini) svcGemini.classList.toggle("selected", svc === "gemini");
+            if (svcCodex) svcCodex.classList.toggle("selected", codex);
+            if (note) note.hidden = !codex;
+            if (autoBtn) autoBtn.hidden = codex;
+            if (credToggle) credToggle.hidden = codex;
+            if (credFields) credFields.hidden = true;
+          }
+          function reset() {
+            if (form) form.hidden = true;
+            if (newCard) { newCard.hidden = true; newCard.classList.remove("pop"); }
+            if (addTile) addTile.classList.remove("is-active");
+            if (nameI) nameI.value = "";
+            selectSkin("Panda v4");
+            setService("claude");
+            if (status) { status.hidden = true; status.textContent = ""; }
+            if (toast) toast.classList.remove("show");
+            if (win) win.scrollTop = 0;
+            d.setCursor(440, 320);
+          }
+          reset();
+          if (staticMode) {
+            if (form) form.hidden = false;
+            if (addTile) addTile.classList.add("is-active");
+            if (nameI) nameI.value = "Codex 계정";
+            selectSkin("Hamster v2");
+            setService("codex");
+            if (status) { status.hidden = false; status.textContent = "5h 72% · 주간 48% · Pro"; }
+            return;
+          }
+          while (alive()) {
+            reset(); await d.sleep(1100); if (!alive()) return;
+            await d.click("[data-addtile]"); if (addTile) addTile.classList.add("is-active"); if (form) form.hidden = false; await d.sleep(720); if (!alive()) return;
+            await d.moveTo(nameI); if (nameI) await d.typeInto(nameI, "Codex 계정"); await d.sleep(620); if (!alive()) return;
+            await d.click('.acc-skins .skin-tile[title="Hamster v2"]'); selectSkin("Hamster v2"); await d.sleep(700); if (!alive()) return;
+            await d.click(svcCodex); setService("codex"); await d.sleep(1000); if (!alive()) return;
+            d.scrollWithin(win, actions); await d.click(".acc-test"); if (status) { status.hidden = false; status.textContent = "로컬 Codex 기록 읽는 중..."; } await d.sleep(1100); if (!alive()) return;
+            if (status) { status.hidden = false; status.textContent = "5h 72% · 주간 48% · Pro"; d.scrollWithin(win, status); }
+            await d.sleep(1400); if (!alive()) return;
+            await d.click(".acc-submit"); await d.sleep(340); if (!alive()) return;
+            if (form) form.hidden = true;
+            if (addTile) addTile.classList.remove("is-active");
+            if (newCard) { newCard.hidden = false; newCard.classList.add("pop"); }
+            if (win) win.scrollTop = 0;
+            if (toast) toast.classList.add("show"); await d.sleep(2700); if (!alive()) return;
+            if (toast) toast.classList.remove("show"); await d.sleep(700);
+          }
+        }
+
+        // ── 탭 3: 새 계정 추가 (설정 창 → + 새 계정 → 이름·캐릭터 → claude.ai 쿠키 → 추가) ──
         async function playAccount(d, alive, staticMode) {
           var win = d.q(".ob-settings");
           var addTile = d.q("[data-addtile]"), form = d.q("[data-form]");
@@ -4085,7 +4409,7 @@
             if (toast) toast.classList.remove("show"); await d.sleep(700);
           }
         }
-        // ── 탭 3: 클로드 API 셋업 (Platform Org+쿠키 → platform.claude.com 콘솔 → 키별 이번 달 비용) ──
+        // ── 탭 4: 클로드 API 셋업 (Platform Org+쿠키 → platform.claude.com 콘솔 → 키별 이번 달 비용) ──
         async function playApi(d, alive, staticMode) {
           var win = d.q(".ob-settings");
           var porg = d.q(".api-porg"), ckI = d.q(".api-cookie");
@@ -4146,7 +4470,7 @@
           }
         }
 
-        // ── 탭 4: 제미나이 셋업 (설정 → + 새 계정 → 서비스 Gemini → gemini.google.com 쿠키 → 추가) ──
+        // ── 탭 5: 제미나이 셋업 (설정 → + 새 계정 → 서비스 Gemini → gemini.google.com 쿠키 → 추가) ──
         async function playGemini(d, alive, staticMode) {
           var win = d.q(".ob-settings");
           var addTile = d.q("[data-addtile]"), form = d.q("[data-form]");
@@ -4156,7 +4480,7 @@
           var status = d.q(".acc-status"), actions = d.q(".obset-actions");
           var cookieEl = d.q(".obc-cookie"), copiedEl = d.q(".obc-copied");
           var claudeFields = d.q(".acc-claude-fields"), geminiFields = d.q(".acc-gemini-fields");
-          var svcClaude = d.q('.obset-svc[data-svc="claude"]'), svcGemini = d.q('.obset-svc[data-svc="gemini"]');
+          var svcClaude = d.q('.obset-svc[data-svc="claude"]'), svcGemini = d.q('.obset-svc[data-svc="gemini"]'), svcCodex = d.q('.obset-svc[data-svc="codex"]');
           var warn = d.q(".acc-gem-warn");
           var credToggle = d.q(".gem-cred-toggle"), credFields = d.q(".gem-cred-fields"), badges = d.q(".cred-toggle-badges");
           // 회전 토큰(__Secure-1PSIDTS / SIDCC)까지 포함한 gemini.google.com 한 줄.
@@ -4168,6 +4492,7 @@
             var gem = svc === "gemini";
             if (svcClaude) svcClaude.classList.toggle("selected", !gem);
             if (svcGemini) svcGemini.classList.toggle("selected", gem);
+            if (svcCodex) svcCodex.classList.remove("selected");
             if (claudeFields) claudeFields.hidden = gem;
             if (geminiFields) geminiFields.hidden = !gem;
             if (warn) warn.hidden = !gem;
@@ -4231,7 +4556,7 @@
           }
         }
 
-        var PLAYERS = { claude: playClaude, account: playAccount, api: playApi, gemini: playGemini };
+        var PLAYERS = { claude: playClaude, codex: playCodex, account: playAccount, api: playApi, gemini: playGemini };
 
         // ── 탭 컨트롤러 ──
         var tabs = section.querySelectorAll(".setup-tab");
@@ -4285,6 +4610,103 @@
           }, { threshold: 0.15 });
           io.observe(section);
         } else { startDefault(); }
+      })();
+    </script>
+    <script>
+      (function () {
+        var link = document.querySelector("nav a.nav-cta[href='#download']");
+        var target = document.getElementById("download");
+        if (!link || !target) return;
+
+        link.addEventListener("click", function (e) {
+          e.preventDefault();
+          var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          window.scrollTo({ top: target.offsetTop, behavior: reduce ? "auto" : "smooth" });
+          if (history.pushState) history.pushState(null, "", "#download");
+          else location.hash = "download";
+        });
+      })();
+    </script>
+    <script>
+      (function () {
+        var root = document.querySelector("[data-live-stats]");
+        if (!root || !window.fetch) return;
+        var ENDPOINT = "https://tp-telemetry.token-guardians.workers.dev/public-stats";
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var status = root.querySelector("[data-live-status]");
+        var downloads = root.querySelector('[data-stat="downloads"]');
+        var d1 = root.querySelector('[data-stat="retention-d1"]');
+        var d7 = root.querySelector('[data-stat="retention-d7"]');
+
+        function fmtInt(v) {
+          return Math.round(v).toLocaleString("ko-KR");
+        }
+        function fmtPct(v) {
+          return (Math.round(v * 10) / 10).toLocaleString("ko-KR", { maximumFractionDigits: 1 }) + "%";
+        }
+        function setPending(el) {
+          el.textContent = "측정중";
+          el.classList.add("is-pending");
+          el.removeAttribute("data-value");
+        }
+        function animate(el, next, formatter) {
+          if (next == null || Number.isNaN(Number(next))) {
+            setPending(el);
+            return;
+          }
+          el.classList.remove("is-pending");
+          var to = Number(next);
+          var from = Number(el.getAttribute("data-value") || 0);
+          if (reduce || !window.requestAnimationFrame) {
+            el.textContent = formatter(to);
+            el.setAttribute("data-value", String(to));
+            return;
+          }
+          var start = performance.now();
+          var duration = 850;
+          function tick(now) {
+            var t = Math.min(1, (now - start) / duration);
+            var eased = 1 - Math.pow(1 - t, 3);
+            el.textContent = formatter(from + (to - from) * eased);
+            if (t < 1) requestAnimationFrame(tick);
+            else {
+              el.textContent = formatter(to);
+              el.setAttribute("data-value", String(to));
+            }
+          }
+          requestAnimationFrame(tick);
+        }
+        function statDate(iso) {
+          var d = iso ? new Date(iso) : new Date();
+          if (Number.isNaN(d.getTime())) d = new Date();
+          var parts = new Intl.DateTimeFormat("ko-KR", {
+            timeZone: "Asia/Seoul",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).formatToParts(d);
+          var byType = {};
+          parts.forEach(function (p) { byType[p.type] = p.value; });
+          return byType.year + "." + byType.month + "." + byType.day;
+        }
+        function apply(data) {
+          var retention = data.retention || {};
+          root.classList.remove("is-error");
+          animate(downloads, data.total_downloads, fmtInt);
+          animate(d1, retention.d1_overall, fmtPct);
+          animate(d7, retention.d7_overall, fmtPct);
+          status.textContent = statDate(data.generated_at) + " 현재";
+        }
+        function load() {
+          fetch(ENDPOINT, { cache: "no-store" })
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
+            .then(apply)
+            .catch(function () {
+              root.classList.add("is-error");
+              status.textContent = "통계를 잠시 못 불러왔어요";
+            });
+        }
+        load();
       })();
     </script>
     <script>
