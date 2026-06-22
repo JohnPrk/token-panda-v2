@@ -1620,12 +1620,12 @@ function Pet({
         data-refreshing={refreshing ? "true" : ""}
         data-tauri-drag-region
         onContextMenu={(e) => {
-          // 우클릭 동작은 설정(config.petRightClickAction)으로 분기. 기본/legacy 는
-          // "refresh"(종전처럼 즉시 새로고침). "menu"면 트레이와 동일 항목의 네이티브
-          // 컨텍스트 메뉴를 메인에서 띄운다. preventDefault 는 두 경우 모두 webview
-          // 기본 메뉴를 막기 위해 유지.
+          // 우클릭 동작은 설정(config.petRightClickAction)으로 분기. v2.33+ 기본/legacy
+          // (미설정)는 "menu"(트레이와 동일 항목의 네이티브 컨텍스트 메뉴)이고, 명시적으로
+          // "refresh" 를 고른 사용자만 종전처럼 즉시 새로고침한다. preventDefault 는 두
+          // 경우 모두 webview 기본 메뉴를 막기 위해 유지.
           e.preventDefault();
-          if (config.petRightClickAction === "menu") {
+          if (config.petRightClickAction !== "refresh") {
             invoke("show_pet_context_menu", {
               toggles: config.petMenuToggles ?? {},
             }).catch(() => {});
@@ -2025,7 +2025,9 @@ function Settings({
   // 저장 후 config-changed 를 emit 해서 펫 윈도우가 즉시 새 설정을 읽게 한다.
   // 항목 목록은 메인(get_menu_items)이 menu.cjs 단일 레지스트리에서 내려주므로,
   // 새 메뉴 항목을 추가하면 이 UI 가 자동으로 따라온다.
-  const [rcAction, setRcAction] = useState<"refresh" | "menu">("refresh");
+  // 초기값은 v2.33+ 기본인 "menu". 저장된 값이 있으면 아래 loadPlanConfig 가
+  // 덮어쓰고, 미설정(legacy)이면 이 기본이 유지돼 소비처와 동일하게 menu 로 보인다.
+  const [rcAction, setRcAction] = useState<"refresh" | "menu">("menu");
   const [menuToggles, setMenuToggles] = useState<Record<string, boolean>>({});
   const [menuItems, setMenuItems] = useState<
     { id: string; settingsLabel: string; conditionalHint: string | null; defaultOn: boolean }[]
